@@ -460,10 +460,14 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
 - **Ask which benchmarks exist for a product before asking for steps.** `list_stigs` with
   a `filter` substring (a product name, or a benchmark id fragment) shows what is on hand
   before you commit to a `system_description` or `stig_ids`.
-- **Ask for the exact steps.** Every finding carries a `rule_id` and `group_id`; asking the
-  model to fetch them with `finding_details` gets DISA's own `check_text` and `fix_text`
-  rather than a paraphrase, and lets you check the source STIG XCCDF yourself. Models tend
-  to add their own commands around DISA's steps; ask which parts are DISA's if it matters.
+- **Ask for the exact steps, word for word.** Every finding carries a `rule_id` and
+  `group_id`; asking the model to fetch them with `finding_details` gets DISA's own
+  `check_text` and `fix_text`, and lets you check the source STIG XCCDF yourself. The tool
+  asks the model to quote that text and label anything it adds, but a model may still
+  paraphrase it, or cite a third-party website as DISA's. Say so in the prompt, for example
+  `Quote DISA's check and fix text for V-253284 word for word, then explain it`. The
+  `stig_title` and `stig_release` in that answer name the benchmark release the text came
+  from.
 - **Ask how current the knowledge base is.** `list_stigs` returns each benchmark's own DISA
   revision number as `version`, not a build date. `mitigations_for_technique` and
   `techniques_for_actor` carry that in their `sources` block instead: which DISA STIG
