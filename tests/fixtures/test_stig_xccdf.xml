@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="TEST_STIG">
+  <title>Test Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 01 Jan 2026</plain-text>
+  <Group id="V-904001">
+    <Rule id="SV-904001r1_rule" severity="high">
+      <title>Test system must enable account management.</title>
+      <description>&lt;VulnDiscussion&gt;Automated account management reduces risk.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure automated account management.</fixtext>
+      <check><check-content>Verify automated account management is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-900001</ident>
+    </Rule>
+  </Group>
+</Benchmark>

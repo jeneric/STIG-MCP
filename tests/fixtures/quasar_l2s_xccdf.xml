@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="QUASAR_FABRIC_L2S_STIG">
+  <title>Quasar Fabric Layer 2 Switch Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-950001">
+    <Rule id="SV-950001r1_rule" severity="medium">
+      <title>Quasar Fabric must disable unused ports.</title>
+      <description>&lt;VulnDiscussion&gt;Unused ports are an entry point.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Disable unused ports.</fixtext>
+      <check><check-content>Verify unused ports are disabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

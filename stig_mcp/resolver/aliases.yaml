@@ -1,0 +1,54 @@
+RHEL_9_STIG:
+  - "rhel 9"
+  - "red hat 9"
+  - "redhat enterprise linux 9"
+  - "red hat enterprise linux 9"
+RHEL_8_STIG:
+  - "rhel 8"
+  - "red hat 8"
+  - "redhat enterprise linux 8"
+  - "red hat enterprise linux 8"
+MS_Windows_Server_2022_STIG:
+  - "windows server 2022"
+  - "win server 2022"
+Microsoft_Windows_11_STIG:
+  - "windows 11"
+  - "win 11"
+  - "microsoft windows 11"
+CAN_Ubuntu_22-04_LTS_STIG:
+  - "ubuntu 22.04"
+  - "ubuntu 22"
+  - "canonical ubuntu 22.04"
+  - "ubuntu 22.04 lts"
+MS_SQL_Server_2022_Instance_STIG:
+  - "sql server 2022"
+  - "microsoft sql server 2022"
+MS_SQL_Server_2022_Database_STIG:
+  - "sql server 2022 database"
+MS_Exchange_2019_Mailbox_Server_STIG:
+  - "exchange 2019 mailbox"
+MS_Exchange_2019_Edge_Server_STIG:
+  - "exchange 2019 edge"
+IIS_10-0_Server_STIG:
+  - "iis 10"
+  - "internet information services 10"
+# VCSA is the vCenter Server Appliance, which is the vCenter STIG plus the nine component
+# STIGs whose own titles read "vCenter Appliance ... Envoy" and so on. Only the PARENT is
+# aliased: the nine components already score 100.0 on the `vcsa` token their own ids carry,
+# so this adds the one benchmark a caller naming the appliance would otherwise not see, and
+# the specificity tiebreak then ranks the parent first because it names fewest tokens the
+# query did not. `vcsa 8` rather than `vcsa 8.0` because _alias_ids is a subset test and
+# normalize splits 8.0 into {8, 0}: the shorter pattern covers both 'VCSA 8.0' and 'VCSA 8'.
+# Same convention as CAN_Ubuntu_22-04_LTS_STIG carrying both spellings, in one pattern
+# instead of two.
+#
+# Do not add the spelled-out 'vcenter server appliance 8.0'. The two spellings are not
+# symmetric: components carry `vcsa` in their ids, so under the acronym the parent JOINS
+# their tied tier, but they carry none of vcenter/server/appliance, so under the spelled-out
+# pattern the parent scores 100.0 alone and EVICTS them. That would cost
+# 'vCenter Server Appliance 8.0 Photon OS' its Photon hit, the Envoy query its Envoy hit, and
+# turn 'vCenter Server Appliance 6.7 upgrading to 8.0' from silence into a confident 8.0
+# answer, to gain one query: bare 'vCenter Server Appliance 8.0', which stays silent here.
+# No corpus-derived sweep can retest this: the phrase appears in no title and no stig_id.
+VMW_vSphere_8-0_vCenter_STIG:
+  - "vcsa 8"

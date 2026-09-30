@@ -1,0 +1,148 @@
+name: Publish
+
+# A manual dispatch is the dry run: it uploads a .devN build to TestPyPI and checks what
+# TestPyPI serves. A v* tag is a real release, to PyPI and then the MCP Registry; it
+# requires this workflow to be registered as the project's trusted publisher on pypi.org,
+# under the environment named in the pypi job. A dispatch started on a tag ref is still a
+# dry run: the release jobs test the event, not only the ref.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  MCP_PUBLISHER_VERSION: v1.8.1
+  # From registry_1.8.1_checksums.txt; bump both together.
+  MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Check the tag names the project version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short --color never)"
+
+      # TestPyPI never accepts a version twice, so each attempt gets its own. The change
+      # lives only on this runner; pyproject.toml and server.json stay at the release.
+      - name: Give the dry run a version of its own
+        if: github.event_name == 'workflow_dispatch'
+        run: uv version --frozen "$(uv version --short --color never).dev$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))"
+
+      - name: Record the version
+        id: version
+        run: echo "version=$(uv version --short --color never)" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          make clean
+          uv build
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+
+  server-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSLo mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - name: Validate server.json against the registry's schema and rules
+        run: ./mcp-publisher validate server.json
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build, server-json]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  testpypi-verify:
+    needs: [build, testpypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - name: Check TestPyPI serves this build, with the registry's ownership line
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: uv run python -m tools.publish_check --index-url https://test.pypi.org --version "$VERSION" --dist dist
+      # The digests above prove the served wheel is this one, so installing the local copy
+      # installs what TestPyPI serves, with dependencies from PyPI rather than TestPyPI.
+      - name: Install the wheel and run a command from it
+        run: uvx --from dist/*.whl stig-mcp-install-kb --help
+
+  pypi:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, server-json]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          skip-existing: true
+
+  registry:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      # The registry reads PyPI's JSON API the moment it is asked; wait until PyPI serves
+      # this build with its ownership line, or the publish fails on a lag.
+      - name: Check PyPI serves this build, with the registry's ownership line
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: uv run python -m tools.publish_check --index-url https://pypi.org --version "$VERSION" --dist dist
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSLo mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - name: Publish server.json to the MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json

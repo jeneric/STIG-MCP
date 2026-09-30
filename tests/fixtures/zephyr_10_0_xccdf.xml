@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="ZEPHYR_GATEWAY_10-0_STIG">
+  <title>Zephyr Gateway 10.0 Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-920001">
+    <Rule id="SV-920001r1_rule" severity="medium">
+      <title>Zephyr Gateway must require authentication.</title>
+      <description>&lt;VulnDiscussion&gt;Unauthenticated gateways are a pivot point.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Require authentication.</fixtext>
+      <check><check-content>Verify authentication is required.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

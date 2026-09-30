@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "mapping_framework": "nist_800_53",
+    "mapping_framework_version": "rev5",
+    "attack_version": "16.1",
+    "last_update": "04/16/2025"
+  },
+  "mapping_objects": [
+    {"attack_object_id": "T1078", "capability_id": "AC-02", "mapping_type": "mitigates", "status": "complete"},
+    {"attack_object_id": "T1078", "capability_id": "CM-03", "mapping_type": "mitigates", "status": "complete"},
+    {"attack_object_id": "T1078", "capability_id": "AC-02", "mapping_type": "mitigates", "status": "complete"},
+    {"attack_object_id": "T9999", "capability_id": "AC-05", "mapping_type": "mitigates", "status": "non_mappable"},
+    {"attack_object_id": "T1055", "capability_id": "SI-04", "mapping_type": "related-to", "status": "complete"}
+  ]
+}

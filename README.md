@@ -1,0 +1,196 @@
+# stig-mcp
+
+Local MCP server that maps MITRE ATT&CK® techniques (and actors) to the NIST
+800-53r5 controls that mitigate them, with the DISA STIG fix and check steps for
+the systems under consideration, severity-ordered.
+
+<!-- mcp-name: io.github.jeneric/stig-mcp -->
+
+## Install
+
+This project uses [UV](https://docs.astral.sh/uv/). Install dependencies with:
+
+    uv sync
+
+## Quickstart
+
+1. `uv sync`: install dependencies, then wire the server into a client (see "Run the
+   server" below) and start it.
+2. Ask the agent to install the knowledge base. It calls the `install_knowledge_base`
+   tool, which downloads the newest published release from this project's GitHub releases
+   and verifies its SHA-256 before installing it. From a terminal the same is
+   `uv run stig-mcp-install-kb`. A host that cannot reach GitHub installs from a file; see
+   [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md), "Install a prebuilt knowledge base". Until the
+   first knowledge-base release is published, the install says so and names the build
+   commands in the next step.
+3. Or build it yourself: `uv run stig-mcp-fetch` downloads ATT&CK, the CTID mapping, the
+   800-53 catalog, and DISA's STIG content. **This transfers roughly a gigabyte** and
+   refuses to start with less than 2 GiB free. Then `uv run stig-mcp-ingest` builds the
+   knowledge base.
+
+On a host that cannot reach `dl.dod.cyber.mil`, place the artifacts in the sources
+directory yourself and go straight to `stig-mcp-ingest`. That is a first-class path rather
+than a fallback: the ingest reads a directory and never consults the fetch. See
+[docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md), "Placing the sources by hand".
+
+Afterwards, `uv run stig-mcp-fetch --check` reports what MITRE ATT&CK, CTID, NIST and DISA
+have published since, exiting 10 when there is something to take and 3 when a source could not
+be reached, and `--refresh` takes it.
+Neither rebuilds the knowledge base; see "Keeping current" in the same document.
+
+## Run the server
+
+    uv run stig-mcp
+
+This is a stdio MCP server: it speaks JSON-RPC on stdin/stdout and logs to stderr,
+so it is launched by an MCP client rather than run standalone.
+
+It starts whether or not the knowledge base exists, and it never answers from one it
+cannot trust. Called before the knowledge base is installed, or against one an older release
+wrote, every tool returns a `not_ready` payload instead of an answer: the reason, which
+source files it can and cannot see, the sources directory it looked in, and the next steps,
+led by the `install_knowledge_base` tool and followed by the commands to run, each in both its
+console-script and `python -m` form. That is deliberate, so an agent can read the remedy from
+the tool result rather than the operator having to find a log pane. Install or rebuild the
+knowledge base and the running server picks it up without a restart.
+
+The `check_sources` tool tells an agent whether a newer knowledge base is published. It and
+`install_knowledge_base` are the only two tools that contact the network, and they reach
+only this project's GitHub releases.
+
+### GitHub Copilot in VS Code
+
+Create `.vscode/mcp.json` in this repository (git-ignored, so it stays local):
+
+```json
+{
+  "servers": {
+    "stig-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "stig-mcp"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
+```
+
+Then:
+
+1. Open Copilot Chat and set the mode dropdown to **Agent**. MCP tools are not
+   available in Ask or Edit mode.
+2. Command Palette (`Ctrl+Shift+P`, or `Cmd+Shift+P` on macOS) and run
+   **MCP: List Servers**, select `stig-mcp`, then **Start**. Trust the server when
+   prompted, since it runs a local command.
+3. Click **Configure Tools** in the chat input to confirm the eight tools are listed
+   and enabled.
+4. Reference a tool explicitly to verify the wiring, rather than hoping the model
+   picks it up on its own. See [docs/user-guide.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md)'s "Getting the
+   LLM to use the server" for a prompt shape that reliably does this.
+
+Copilot saves a tool answer over 8 KB to a temporary file and reads it back, so with
+manual permissions it asks to read a file named like `…copilot-tool-output-….txt`
+outside the workspace. That file is this server's answer; allow it.
+
+To debug, run **MCP: List Servers**, select the server, and choose **Show Output**.
+The two common failures are that `uv` is not on the `PATH` VS Code inherited, which
+looks like a broken server but is a missing command, and an absent knowledge base.
+For the first, use uv's absolute path (`which uv`) as `command`. For the second, see
+[docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md).
+
+### Other clients
+
+Any MCP client that launches a stdio server works. `uv run` locates the project from
+the working directory, so a client that starts elsewhere needs `--directory`, which
+makes the command independent of where it is launched:
+
+    uv run --directory /path/to/STIG-MCP stig-mcp
+
+For Claude Code, from the repository root:
+
+    claude mcp add stig-mcp -- uv run stig-mcp
+
+By default the knowledge base is not found relative to the working directory, so only `uv`
+cares where the client starts the server. Where it *is* found depends on whether this is a
+checkout or an installed copy. (A relative `STIG_MCP_DATA` does resolve against the working
+directory, so give it an absolute path if the client's is not yours.)
+
+### Where the data lives
+
+Two environment variables override the defaults, and the defaults differ between a source
+checkout and an installed copy:
+
+| | source checkout | installed, POSIX and macOS | installed, Windows |
+|---|---|---|---|
+| data directory (`STIG_MCP_DATA`) | `stig_mcp/data/` | `$XDG_DATA_HOME/stig-mcp`, else `~/.local/share/stig-mcp` | `$XDG_DATA_HOME/stig-mcp`, else `%LOCALAPPDATA%\stig-mcp`, else `~\.local\share\stig-mcp` |
+| mapping overrides (`STIG_MCP_OVERRIDES`) | `overrides.yaml` at the repository root | `$XDG_CONFIG_HOME/stig-mcp/overrides.yaml`, else `~/.config/stig-mcp/overrides.yaml` | `$XDG_CONFIG_HOME/stig-mcp/overrides.yaml`, else `%LOCALAPPDATA%\stig-mcp\overrides.yaml`, else `~\.config\stig-mcp\overrides.yaml` |
+
+A checkout is a directory holding both the package and the `pyproject.toml` that declares
+it, so an editable install counts as one. XDG is used on POSIX, including macOS. On Windows
+with the XDG variables unset, the default is `%LOCALAPPDATA%`, because a roaming profile
+copies `~/.local/share` at every logon and logoff, and this project's downloads can run to a
+gigabyte; when
+`%LOCALAPPDATA%` is set this puts the mapping overrides file inside the data directory rather
+than beside it, since Windows has one such variable rather than XDG's separate data and config
+locations. (With `%LOCALAPPDATA%` unset, Windows falls back to the same separate `~/.config`
+and `~/.local/share` trees POSIX uses, so the two stay apart in that case, same as the table
+above shows.)
+
+**The XDG variables are read first on every platform, Windows included**, as the table's
+Windows column shows: a Windows host with `XDG_DATA_HOME` set uses it and never reaches
+`%LOCALAPPDATA%`, so the roaming argument above holds only where that variable is unset. The
+order is kept so that an existing install's data directory never moves under it.
+`STIG_MCP_DATA` and `STIG_MCP_OVERRIDES` outrank everything above and are the escape hatch
+everywhere, for a native location or any other.
+
+`stig-mcp-ingest` creates the data directory if it does not exist. It refuses to run when
+`STIG_MCP_OVERRIDES` names a file that is not there, rather than silently applying no
+overrides; a missing file at the default location is fine, because that file is optional.
+
+## What this server fetches
+
+- The MCP server contacts nothing unless `check_sources` or `install_knowledge_base` is
+  called. Then it sends HTTPS GET requests to `api.github.com` (this repository's release
+  listing) and `github.com` (`/jeneric/STIG-MCP/releases/download/...`), which redirects to
+  `release-assets.githubusercontent.com` or `objects.githubusercontent.com`. Any other URL, a
+  redirect included, is refused. Nothing is uploaded, and there is no telemetry.
+  `install_knowledge_base` given a file path and its SHA-256 requests nothing at all.
+- `stig-mcp-install-kb` contacts the same hosts, and nothing at all with `--file`.
+- `stig-mcp-fetch`, used only to build the knowledge base yourself, downloads from
+  `raw.githubusercontent.com` and `api.github.com` (MITRE ATT&CK, the CTID mapping, the NIST
+  800-53 catalog) and from `dl.dod.cyber.mil` (DISA).
+
+[PRIVACY.md](https://github.com/jeneric/STIG-MCP/blob/main/PRIVACY.md) states what each of these requests sends and what is stored locally.
+
+## Example prompts
+
+With the knowledge base installed and the server wired into an agent, these are answered
+from it:
+
+1. `What DISA STIG steps mitigate T1078 on Windows 11?`
+2. `Which ATT&CK techniques does APT29 use?`
+3. `Which STIG benchmarks apply to RHEL 9?`
+
+## Documentation
+
+- [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md): for whoever installs, builds and maintains the knowledge base.
+- [docs/user-guide.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md): for a person talking to an LLM that has this server wired in.
+- [SECURITY.md](https://github.com/jeneric/STIG-MCP/blob/main/SECURITY.md): reporting a vulnerability, and what is in scope.
+- [RELEASING.md](https://github.com/jeneric/STIG-MCP/blob/main/RELEASING.md): for the maintainer, publishing the package to PyPI and the MCP Registry.
+- [PRIVACY.md](https://github.com/jeneric/STIG-MCP/blob/main/PRIVACY.md): what the server and the fetch tool contact, and what is stored locally.
+
+## Third-party content
+
+The knowledge base aggregates MITRE ATT&CK, CTID mapping, DISA STIG, DISA CCI
+list, and NIST OSCAL content. See [NOTICE](https://github.com/jeneric/STIG-MCP/blob/main/NOTICE) for attribution and licensing obligations
+and [licenses/apache-2.0.txt](https://github.com/jeneric/STIG-MCP/blob/main/licenses/apache-2.0.txt) for the Apache 2.0
+license text that notice requires.
+
+## Development
+
+Developed with the assistance of Claude Code (Anthropic). All changes were reviewed and
+tested by the maintainer.
+
+## Tests
+
+    uv run pytest

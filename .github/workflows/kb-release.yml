@@ -1,0 +1,168 @@
+name: Knowledge-base release
+
+on:
+  schedule:
+    # Mondays 06:17 UTC: off the hour, when scheduled runs queue longest.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: kb-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Point the data directory at scratch
+        run: echo "STIG_MCP_DATA=$RUNNER_TEMP/kb-data" >> "$GITHUB_ENV"
+
+      # Speed only: a miss makes --check exit 10, and kb_release build then finds the content
+      # unchanged and drafts nothing.
+      - name: Restore sources
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kb-data/sources
+          key: kb-sources-${{ github.run_id }}
+          restore-keys: kb-sources-
+
+      - name: Check upstream
+        id: check
+        run: |
+          set +e
+          uv run stig-mcp-fetch --check
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Decide
+        id: decide
+        run: |
+          gh api "repos/$GH_REPO/releases?per_page=100" > "$RUNNER_TEMP/listing.json"
+          newest=$(uv run python -m tools.kb_release newest --listing "$RUNNER_TEMP/listing.json")
+          previous=()
+          if [ -n "$newest" ]; then
+            gh release download "$newest" --pattern release.json --dir "$RUNNER_TEMP/previous"
+            previous=(--previous "$RUNNER_TEMP/previous/release.json")
+            echo "previous_tag=$newest" >> "$GITHUB_OUTPUT"
+          fi
+          uv run python -m tools.kb_release decide --listing "$RUNNER_TEMP/listing.json" \
+            --check-exit "${{ steps.check.outputs.code }}" --event "${{ github.event_name }}" \
+            "${previous[@]}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Refresh sources
+        if: steps.decide.outputs.build == 'true'
+        run: uv run stig-mcp-fetch --refresh --drop-withdrawn
+
+      # The refresh reports a public source it could not reach (a rate-limited api.github.com
+      # call) as "not refreshed" and carries on, which would ship the old file beside current
+      # DISA ones. Only exit 0 here means every source is current.
+      - name: Confirm sources are current
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          uv run stig-mcp-fetch --check || {
+            code=$?
+            echo "stig-mcp-fetch --check exited $code after the refresh (10: a source is still out of date, 3: a source could not be checked); refusing to build from these sources."
+            exit 1
+          }
+
+      - name: Ingest
+        if: steps.decide.outputs.build == 'true'
+        run: uv run stig-mcp-ingest
+
+      # Empty is treated as unset (config.resolve_paths), so the suite runs exactly as in ci.yml
+      # rather than against the knowledge base just ingested.
+      - name: Run tests
+        if: steps.decide.outputs.build == 'true'
+        env:
+          STIG_MCP_DATA: ""
+        run: uv run pytest
+
+      - name: Verify and package
+        id: build
+        if: steps.decide.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+          PREVIOUS_TAG: ${{ steps.decide.outputs.previous_tag }}
+        run: |
+          previous=()
+          if [ -n "$PREVIOUS_TAG" ]; then
+            previous=(--previous "$RUNNER_TEMP/previous/release.json" --previous-tag "$PREVIOUS_TAG")
+          fi
+          uv run python -m tools.kb_release build --tag "$TAG" \
+            --out "$RUNNER_TEMP/release" --event "${{ github.event_name }}" \
+            "${previous[@]}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Replace unpublished drafts
+        if: steps.build.outputs.changed == 'true'
+        env:
+          DELETE_DRAFTS: ${{ steps.decide.outputs.delete_drafts }}
+        run: |
+          read -ra draft_ids <<< "$DELETE_DRAFTS"
+          for id in "${draft_ids[@]}"; do
+            draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
+            [ "$draft" = "true" ] || { echo "release $id is not a draft; refusing to delete it"; exit 1; }
+            gh api -X DELETE "repos/$GH_REPO/releases/$id"
+          done
+
+      - name: Draft release
+        if: steps.build.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          mapfile -t assets < "$RUNNER_TEMP/release/assets.txt"
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Knowledge base $TAG" --notes-file "$RUNNER_TEMP/release/notes.md" "${assets[@]}"
+
+      - name: Record kb/LATEST on kb-latest
+        if: steps.build.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin kb-latest; then
+            git fetch origin kb-latest
+            git worktree add -B kb-latest "$RUNNER_TEMP/latest" FETCH_HEAD
+          else
+            git worktree add --orphan -b kb-latest "$RUNNER_TEMP/latest"
+          fi
+          mkdir -p "$RUNNER_TEMP/latest/kb"
+          cp "$RUNNER_TEMP/release/LATEST" "$RUNNER_TEMP/latest/kb/LATEST"
+          git -C "$RUNNER_TEMP/latest" add kb/LATEST
+          git -C "$RUNNER_TEMP/latest" commit -m "Record draft $TAG"
+          git -C "$RUNNER_TEMP/latest" push origin kb-latest
+
+      - name: Save sources
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kb-data/sources
+          key: kb-sources-${{ github.run_id }}
+
+      # A job timeout ends as cancelled, not failed.
+      - name: Report failure
+        if: failure() || cancelled()
+        run: |
+          gh label create kb-release --color B60205 --description "Knowledge-base release workflow" --force
+          url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          issue=$(gh issue list --label kb-release --state open --json number --jq '.[0].number')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "Failed again: $url"
+          else
+            gh issue create --title "Knowledge-base release failed" --label kb-release --body "The kb-release workflow failed: $url"
+          fi

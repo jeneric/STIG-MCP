@@ -1,0 +1,19 @@
+{
+  "type": "bundle",
+  "id": "bundle--unordered",
+  "objects": [
+    {"type": "x-mitre-collection", "x_mitre_version": "16.1"},
+    {"type": "attack-pattern", "id": "attack-pattern--sub-before-parent",
+     "name": "Default Accounts", "x_mitre_is_subtechnique": true,
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078.001"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--orphan-sub",
+     "name": "Orphan Sub-technique", "x_mitre_is_subtechnique": true,
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T2000.001"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--base-after-sub",
+     "name": "Valid Accounts", "x_mitre_is_subtechnique": false,
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078"}]}
+  ]
+}

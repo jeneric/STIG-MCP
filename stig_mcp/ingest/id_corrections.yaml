@@ -1,0 +1,38 @@
+# Corrected identities for documents DISA stamped with another benchmark's id.
+#
+# The ingest keys benchmarks on (stig_id, version), so two documents that self-report one id at
+# one version cannot both be stored, and one is discarded. This file names the halves of that
+# split when a DISA document says what the split is.
+#
+# It is consulted ONLY when the ingest has already decided, from content, that two documents in
+# one artifact at one release are different benchmarks: their rule id sets are disjoint. It can
+# therefore never rename a benchmark that merely lost a release contest.
+#
+# match is a substring of DiscoveredBenchmark.source_document, the path INSIDE the inner zip.
+# Do not key it on source_member: that is the inner zip name, identical for a colliding pair,
+# and its prefix moves between library editions (2020_01 nests everything under
+# U_SRG-STIG_Library_2020_01/ while v3 and v4 do not).
+#
+# Every entry needs at least two documents, distinct match fragments, and distinct stig_ids.
+# Correcting both halves to one id would re-create the collision.
+#
+# Re-check this file on every library refresh. See docs/operations.md.
+
+MS_SQL_Server_2012_Database_Instance_STIG:
+  source: 'U_MS_SQL_Server_2012_V1R18_Overview.pdf section 2.1, "The security requirements
+    contained within the SQL Server 2012 STIG are broken into two parts. The SQL Server
+    Instance STIG will be used for the setting to apply to the actual instance (or
+    installation) of SQL Server 2012. The SQL Server 2012 Database STIG should be used for each
+    individual database (including those that are vendor-supplied, such as master)."'
+  verified_against: 'SRG-STIG Library 2020_01, 2020_01v3 and 2020_01v4. Both documents self-report
+    id MS_SQL_Server_2012_Database_Instance_STIG at V1R18 with identical titles, descriptions
+    and status dates, and share 0 of their 181 rule ids. The corrected ids follow DISA''s own
+    later naming for the same split, MS_SQL_Server_2016_Database_STIG and
+    MS_SQL_Server_2016_Instance_STIG.'
+  documents:
+    - match: '_Database_V1R18_Manual_STIG/'
+      stig_id: MS_SQL_Server_2012_Database_STIG
+      title: 'Microsoft SQL Server 2012 Database Security Technical Implementation Guide'
+    - match: '_Instance_V1R18_Manual_STIG/'
+      stig_id: MS_SQL_Server_2012_Instance_STIG
+      title: 'Microsoft SQL Server 2012 Instance Security Technical Implementation Guide'

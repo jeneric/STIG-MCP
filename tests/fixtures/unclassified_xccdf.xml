@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="Microsoft_Access_2010">
+  <status date="2020-01-24">accepted</status>
+  <title>Microsoft Access 2010</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 10 Benchmark Date: 24 Jan 2020</plain-text>
+  <Group id="V-400001">
+    <Rule id="SV-400001r1_rule" severity="low">
+      <title>A 2020-era requirement.</title>
+      <description>&lt;VulnDiscussion&gt;Pre-2021 documents carry no marker.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure it.</fixtext>
+      <check><check-content>Verify it.</check-content></check>
+    </Rule>
+  </Group>
+</Benchmark>

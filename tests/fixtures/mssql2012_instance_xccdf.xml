@@ -1,0 +1,22 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="MS_SQL_Server_2012_Database_Instance_STIG">
+  <status date="2019-01-08">accepted</status>
+  <title>Microsoft SQL Server 2012 Database Instance Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 18 Benchmark Date: 25 Jan 2019</plain-text>
+  <Group id="V-40905">
+    <Rule id="SV-40905r1_rule" severity="high">
+      <title>The instance must be configured.</title>
+      <description>&lt;VulnDiscussion&gt;Models the 153-rule Instance half. Identical id, title, version, release and status date to its sibling; only the rules differ.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure the instance.</fixtext>
+      <check><check-content>Verify the instance.</check-content></check>
+    </Rule>
+  </Group>
+  <Group id="V-40906">
+    <Rule id="SV-40906r1_rule" severity="low">
+      <title>The instance must be audited.</title>
+      <description>&lt;VulnDiscussion&gt;Two rules against the sibling's one, so which document survived is observable.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Audit the instance.</fixtext>
+      <check><check-content>Verify auditing.</check-content></check>
+    </Rule>
+  </Group>
+</Benchmark>

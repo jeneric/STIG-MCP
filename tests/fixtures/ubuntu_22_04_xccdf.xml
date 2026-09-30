@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="CAN_UBUNTU_22-04_LTS_STIG">
+  <title>Canonical Ubuntu 22.04 LTS Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-960001">
+    <Rule id="SV-960001r1_rule" severity="medium">
+      <title>Ubuntu must enforce password complexity.</title>
+      <description>&lt;VulnDiscussion&gt;Weak passwords are guessable.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure pam_pwquality.</fixtext>
+      <check><check-content>Verify pam_pwquality is configured.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

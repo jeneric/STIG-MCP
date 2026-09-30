@@ -1,0 +1,10 @@
+add:
+  - technique: T1078
+    control: AC-6
+  - technique: T8001
+    control: AC-5
+suppress:
+  - technique: T1078
+    control: AC-8
+  - technique: T8002
+    control: AC-3

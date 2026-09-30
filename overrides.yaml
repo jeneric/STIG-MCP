@@ -1,0 +1,5 @@
+# Local ATT&CK -> 800-53r5 additions/suppressions.
+# add:      pairs to include beyond the CTID mapping
+# suppress: CTID pairs to remove (tombstones)
+add: []
+suppress: []

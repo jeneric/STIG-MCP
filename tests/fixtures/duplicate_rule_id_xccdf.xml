@@ -1,0 +1,39 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="ZZSTORAGE_FABRIC_STIG">
+  <status date="2026-03-09">accepted</status>
+  <title>Zzstorage Fabric Security Technical Implementation Guide</title>
+  <version>2</version>
+  <plain-text id="release-info">Release: 5 Benchmark Date: 09 Mar 2026</plain-text>
+  <Group id="V-950201">
+    <Rule id="SV-950201r1_rule" severity="high">
+      <title>Zzstorage Fabric must zone its initiators.</title>
+      <description>&lt;VulnDiscussion&gt;First occurrence of the id.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Zone the initiators.</fixtext>
+      <check><check-content>Verify initiator zoning.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950202">
+    <Rule id="SV-950201r1_rule" severity="medium">
+      <title>Zzstorage Fabric must be supported by the vendor.</title>
+      <description>&lt;VulnDiscussion&gt;A DIFFERENT requirement carrying the same Rule id, which is
+      what DISA actually ships. Measured 2026-09-02: SV-6802r1_rule in SAN covers V-6656 SNMP
+      access and V-6662 vendor support, and SV-7031r1_rule in MULTI-FUNCTION_DEVICE covers V-6806
+      administrator restriction and V-6807 vendor support. In both, title, fix text and check text
+      all differ, so the dropped occurrence is a requirement no benchmark ends up holding. A
+      fixture whose two occurrences matched would make the message's claim look true.
+      &lt;/VulnDiscussion&gt;</description>
+      <fixtext>Upgrade to a vendor-supported release.</fixtext>
+      <check><check-content>Verify the release is vendor supported.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950203">
+    <Rule id="SV-950203r1_rule" severity="low">
+      <title>Zzstorage Fabric must log fabric logins.</title>
+      <description>&lt;VulnDiscussion&gt;Unique.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Log fabric logins.</fixtext>
+      <check><check-content>Verify fabric login logging.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

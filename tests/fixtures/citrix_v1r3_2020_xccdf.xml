@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="Citrix_XenDesktop_License_Server_STIG">
+  <status date="2019-12-12">accepted</status>
+  <title>Citrix XenDesktop 7.x License Server Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 3 Benchmark Date: 24 Jan 2020</plain-text>
+  <Group id="V-96126">
+    <Rule id="SV-96127r1_rule" severity="medium">
+      <title>The License Server must be configured with the old rule numbering.</title>
+      <description>&lt;VulnDiscussion&gt;Pre-2021 rule identifiers.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure it.</fixtext>
+      <check><check-content>Verify it.</check-content></check>
+    </Rule>
+  </Group>
+</Benchmark>

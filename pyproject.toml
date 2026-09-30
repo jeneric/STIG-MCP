@@ -1,0 +1,96 @@
+[project]
+name = "stig-mcp"
+version = "0.1.0"
+description = "MCP server mapping MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Eric Miller" }]
+license = "MIT"
+license-files = ["NOTICE", "LICENSE", "licenses/*"]
+dependencies = [
+    "defusedxml>=0.7.1",
+    # >=2.2: the first release measured, and the one that hides an unexpected exception's text
+    # from the caller, which server/app.py relies on. <3: the SDK breaks its public API only in a
+    # major (its VERSIONING.md), as 2.0 did by renaming FastMCP and threading sync tools.
+    "mcp>=2.2,<3",
+    "pyyaml>=6.0.3",
+]
+
+[project.urls]
+Source = "https://github.com/jeneric/STIG-MCP"
+Issues = "https://github.com/jeneric/STIG-MCP/issues"
+Security = "https://github.com/jeneric/STIG-MCP/security/policy"
+
+[project.scripts]
+stig-mcp = "stig_mcp.server.app:main"
+stig-mcp-ingest = "stig_mcp.ingest.orchestrator:main"
+stig-mcp-fetch = "stig_mcp.ingest.fetch:main"
+stig-mcp-extract = "stig_mcp.ingest.library:main"
+stig-mcp-install-kb = "stig_mcp.kb.install:main"
+
+[build-system]
+# >=77 for stable PEP 639 [project.license-files] support (NOTICE/licenses/ packaging).
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["stig_mcp*"]
+
+# Every file here is opened at runtime relative to its own module's directory, so an
+# installed wheel is broken without it: schema.sql is what creates the database.
+# Listed per package rather than by wildcard so no pattern can reach stig_mcp/data,
+# which holds multi-megabyte DISA archives and belongs to the operator, not the package.
+[tool.setuptools.package-data]
+"stig_mcp" = ["applicability.yaml"]
+"stig_mcp.ingest" = ["id_corrections.yaml"]
+"stig_mcp.kb" = ["schema.sql"]
+"stig_mcp.resolver" = ["aliases.yaml"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=. --cov-report=term-missing --cov-branch"
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff==0.15.22",  # pinned exactly to the .pre-commit-config.yaml hook rev
+    "setuptools>=77",
+]
+
+[tool.uv]
+# uv reuses a built editable install until one of these changes, and the notices every
+# knowledge base stores are read from that build's dist-info, not from the checkout.
+cache-keys = [{ file = "pyproject.toml" }, { file = "NOTICE" }, { file = "LICENSE" }, { file = "licenses/*" }]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "S",   # flake8-bandit
+    "PL",  # Pylint
+]
+
+[tool.ruff.lint.per-file-ignores]
+# In test files, asserts (S101) and literal expected values in comparisons (PLR2004)
+# are idiomatic, not smells.
+"tests/**/*.py" = ["S101", "PLR2004"]
+"test_*.py" = ["S101", "PLR2004"]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    ".venv/*",
+    "__init__.py"
+]
+
+[tool.coverage.report]
+# Coverage floor: the test run fails below it.
+fail_under = 80
+show_missing = true

@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="RHEL_9_STIG">
+  <title>Red Hat Enterprise Linux 9 Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 2 Benchmark Date: 24 Oct 2024</plain-text>
+  <Group id="V-100009">
+    <Rule id="SV-100009r1_rule" severity="medium">
+      <title>RHEL 9 v1r2-only rule that must win over v1r1 within major 1.</title>
+      <description>&lt;VulnDiscussion&gt;v1r2 discussion.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>v1r2 fix.</fixtext>
+      <check><check-content>v1r2 check.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000048</ident>
+    </Rule>
+  </Group>
+</Benchmark>

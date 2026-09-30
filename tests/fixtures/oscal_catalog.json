@@ -1,0 +1,28 @@
+{
+  "catalog": {
+    "uuid": "test-catalog",
+    "groups": [
+      {
+        "id": "ac",
+        "class": "family",
+        "title": "Access Control",
+        "controls": [
+          {"id": "ac-1", "title": "Policy and Procedures"},
+          {"id": "ac-2", "title": "Account Management", "controls": [
+            {"id": "ac-2.1", "class": "SP800-53-enhancement", "title": "Automated System Account Management"}
+          ]},
+          {"id": "ac-6", "title": "Least Privilege"},
+          {"id": "ac-8", "title": "System Use Notification"}
+        ]
+      },
+      {
+        "id": "cm",
+        "class": "family",
+        "title": "Configuration Management",
+        "controls": [
+          {"id": "cm-6", "title": "Configuration Settings"}
+        ]
+      }
+    ]
+  }
+}

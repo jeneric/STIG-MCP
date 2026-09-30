@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="SENTINEL_4180X_RELAY_STIG">
+  <title>Sentinel 4180X Relay Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-951001">
+    <Rule id="SV-951001r1_rule" severity="medium">
+      <title>Sentinel 4180X Relay must authenticate management sessions.</title>
+      <description>&lt;VulnDiscussion&gt;Unauthenticated management permits takeover.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Require authentication for management sessions.</fixtext>
+      <check><check-content>Verify management sessions require authentication.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

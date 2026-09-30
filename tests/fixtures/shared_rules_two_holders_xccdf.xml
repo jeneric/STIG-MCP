@@ -1,0 +1,33 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="ZZCONTAINER_PLATFORM_4-8_STIG">
+  <status date="2023-01-04">accepted</status>
+  <title>Zzcontainer Platform 4-8 Security Technical Implementation Guide</title>
+  <version>3</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 04 Jan 2023</plain-text>
+  <Group id="V-950101">
+    <Rule id="SV-950101r1_rule" severity="high">
+      <title>Zzcontainer Platform must authenticate every request.</title>
+      <description>&lt;VulnDiscussion&gt;Also held by the 4-X benchmark.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Enable request authentication.</fixtext>
+      <check><check-content>Verify request authentication is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950112">
+    <Rule id="SV-950112r1_rule" severity="medium">
+      <title>Zzcontainer Platform must rotate its service tokens.</title>
+      <description>&lt;VulnDiscussion&gt;Also held by the 4-11 benchmark.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Rotate service tokens.</fixtext>
+      <check><check-content>Verify service tokens rotate.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950181">
+    <Rule id="SV-950181r1_rule" severity="low">
+      <title>Zzcontainer Platform must pin its base image.</title>
+      <description>&lt;VulnDiscussion&gt;Held by nothing else.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Pin the base image.</fixtext>
+      <check><check-content>Verify the base image is pinned.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

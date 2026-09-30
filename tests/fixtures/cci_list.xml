@@ -1,0 +1,18 @@
+<!-- tests/fixtures/cci_list.xml -->
+<cci_list xmlns="http://iase.disa.mil/cci">
+  <cci_items>
+    <cci_item id="CCI-000015">
+      <definition>The organization employs automated mechanisms for account management.</definition>
+      <references>
+        <reference creator="NIST" title="NIST SP 800-53 Revision 4" version="4" index="CM-6"/>
+        <reference creator="NIST" title="NIST SP 800-53 Revision 5" version="5" index="AC-2 (1)"/>
+      </references>
+    </cci_item>
+    <cci_item id="CCI-000048">
+      <definition>The information system displays a logon banner.</definition>
+      <references>
+        <reference creator="NIST" title="NIST SP 800-53 Revision 5" version="5" index="AC-8 a"/>
+      </references>
+    </cci_item>
+  </cci_items>
+</cci_list>

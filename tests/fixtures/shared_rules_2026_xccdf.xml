@@ -1,0 +1,33 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="ZZCONTAINER_PLATFORM_4-X_STIG">
+  <status date="2026-05-13">accepted</status>
+  <title>Zzcontainer Platform 4-X Security Technical Implementation Guide</title>
+  <version>2</version>
+  <plain-text id="release-info">Release: 6 Benchmark Date: 13 May 2026</plain-text>
+  <Group id="V-950101">
+    <Rule id="SV-950101r1_rule" severity="high">
+      <title>Zzcontainer Platform must authenticate every request.</title>
+      <description>&lt;VulnDiscussion&gt;Shared with the successor benchmark.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Enable request authentication.</fixtext>
+      <check><check-content>Verify request authentication is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950102">
+    <Rule id="SV-950102r1_rule" severity="medium">
+      <title>Zzcontainer Platform must log every denial.</title>
+      <description>&lt;VulnDiscussion&gt;Shared with the successor benchmark.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Enable denial logging.</fixtext>
+      <check><check-content>Verify denial logging is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-950121">
+    <Rule id="SV-950121r1_rule" severity="low">
+      <title>Zzcontainer Platform 4-X must pin its admission controller.</title>
+      <description>&lt;VulnDiscussion&gt;Present only in the newer benchmark.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Pin the admission controller.</fixtext>
+      <check><check-content>Verify the admission controller is pinned.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

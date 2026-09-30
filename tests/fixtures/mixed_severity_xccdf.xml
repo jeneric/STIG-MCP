@@ -1,0 +1,49 @@
+<!-- Three rules of three severities under ONE control, so severity ordering is observable.
+     kb_path cannot express this: its only CAT-II rule maps via CCI-000048 to AC-8, and AC-8 is
+     suppressed for T1078, so exactly one finding ever reaches an ordering assertion there.
+
+     BOTH orderings a reader might mistake for the answer are deliberately WRONG here, because
+     findings_for_control sorts by `_CAT_ORDER, stig_id, stig_version, rule_id` and all three rules
+     share the first two, so rule_id is the effective tiebreak:
+
+       document order  medium, high, low  ->  II, I, III
+       rule_id order   770001, 770002, 770003 (medium, high, low) -> II, I, III
+
+     Rules numbered BY SEVERITY would make rule_id order identical to severity order, so removing
+     `_CAT_ORDER` from the ORDER BY would leave the rule_id tiebreak producing the right answer anyway
+     and the test would pass. Do not renumber these into severity order.
+
+     The 770000 range is unused elsewhere. rule_id is a global PRIMARY KEY that ingest silently
+     de-duplicates, so an id shared with another fixture would drop one of these rules. -->
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="MIXED_SEVERITY_STIG">
+  <title>Ordermatters Severity Appliance Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-770001">
+    <Rule id="SV-770001r1_rule" severity="medium">
+      <title>Ordermatters must warn on account changes.</title>
+      <description>&lt;VulnDiscussion&gt;A warning is a medium finding.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Enable warnings on account changes.</fixtext>
+      <check><check-content>Verify warnings are enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-770002">
+    <Rule id="SV-770002r1_rule" severity="high">
+      <title>Ordermatters must enable automated account management.</title>
+      <description>&lt;VulnDiscussion&gt;Unmanaged accounts are a high finding.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure automated account management.</fixtext>
+      <check><check-content>Verify automated account management is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-770003">
+    <Rule id="SV-770003r1_rule" severity="low">
+      <title>Ordermatters should log account enumeration.</title>
+      <description>&lt;VulnDiscussion&gt;Missing logging is a low finding.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Enable account enumeration logging.</fixtext>
+      <check><check-content>Verify account enumeration logging is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="AAA_Services_SRG">
+  <status date="2026-01-15">accepted</status>
+  <title>Authentication Authorization and Accounting Services Security Requirements Guide</title>
+  <version>2</version>
+  <plain-text id="release-info">Release: 2 Benchmark Date: 15 Jan 2026</plain-text>
+  <Group id="V-201001">
+    <Rule id="SV-201001r1_rule" severity="medium">
+      <title>An SRG requirement.</title>
+      <description>&lt;VulnDiscussion&gt;Generic requirement.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure it.</fixtext>
+      <check><check-content>Verify it.</check-content></check>
+    </Rule>
+  </Group>
+</Benchmark>

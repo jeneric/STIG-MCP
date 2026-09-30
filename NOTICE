@@ -1,0 +1,102 @@
+Third-party notices for stig-mcp
+=================================
+
+This knowledge base aggregates content from five upstream sources. This file
+records the attribution and licensing obligations that travel with it. Any
+distributed copy of a built knowledge base must carry this notice and the license
+texts under licenses/ with it.
+
+MITRE ATT&CK®
+-------------
+
+Technique names, descriptions, and ids ingested from the MITRE ATT&CK®
+Enterprise STIX bundle (`enterprise-attack.json`) originate with MITRE and
+carry the following statement, embedded in that bundle by MITRE:
+
+    Copyright 2015-2026, The MITRE Corporation. MITRE ATT&CK and ATT&CK are
+    registered trademarks of The MITRE Corporation.
+
+MITRE's ATT&CK Terms of Use grants a license to use ATT&CK and authorizes
+copies made for those purposes, on the condition that both the copyright
+designation and the license paragraph below travel with each copy. Both are
+quoted verbatim from the LICENSE section of
+https://attack.mitre.org/resources/legal-and-branding/terms-of-use/,
+captured 2026-08-08 (the year in the designation reflects that capture date,
+not a fixed value):
+
+    The MITRE Corporation (MITRE) hereby grants you a non-exclusive,
+    royalty-free license to use ATT&CK® for research, development, and
+    commercial purposes. Any copy you make for such purposes is authorized
+    provided that you reproduce MITRE's copyright designation and this
+    license in any such copy.
+
+    © 2026 The MITRE Corporation. This work is reproduced and distributed
+    with the permission of The MITRE Corporation.
+
+stig-mcp is not affiliated with, sponsored by, or endorsed by MITRE.
+
+Center for Threat-Informed Defense (CTID) mappings
+---------------------------------------------------
+
+The ATT&CK-to-NIST 800-53r5 mapping data ingested from CTID's
+`mappings-explorer` project (`ctid_mappings.json`) is licensed under the
+Apache License, Version 2.0. The full license text is included at
+licenses/apache-2.0.txt. The project carries this notice:
+
+    © 2024 MITRE. Approved for public release. Document number(s) CT0104.
+
+Each mapping record also names the ATT&CK technique it maps, and those names
+fall under the ATT&CK terms above. stig-mcp transforms and subsets this data
+into its knowledge base.
+
+DISA STIG content
+-----------------
+
+STIG rule metadata, check text, and fix text are ingested from the unclassified
+(`U_`) SRG-STIG Library Compilation, the Rev 4 SRG-STIG Sunset Compilation, and
+individual STIG archives published by the Defense Information Systems Agency
+(DISA) on DoD Cyber Exchange. The
+compilation's readme (SRG-STIG Library Compilation Readme, V2R1, 06 August
+2024) describes the `U_` compilation as containing "only publicly releasable
+STIGs and related content for download by the general public", and states:
+
+    The compilations may be used and distributed in the same manner as
+    individually downloaded documents.
+
+Cyber Exchange's Privacy & Security page
+(https://www.cyber.mil/privacy-security/, captured 2026-09-26; archived copy at
+https://web.archive.org/web/20250118065122/https://public.cyber.mil/privacy-security/)
+states: "Information presented on Cyber Exchange is considered public
+information and may be distributed or copied. Use of appropriate
+byline/photo/image credits is requested."
+
+Credit: STIG content courtesy of the Defense Information Systems Agency (DISA),
+DoD Cyber Exchange, https://www.cyber.mil/stigs/.
+
+Many STIGs are developed jointly by a product vendor and DISA, as the overview
+document of each such STIG states. Text written by DISA is a work of the United
+States Government and is not subject to copyright protection in the United
+States; this notice makes no such claim for vendor-contributed text, whose
+distribution rests on DISA's release statements above. stig-mcp-fetch refuses
+controlled (`CUI_`) content, and stig-mcp-ingest and stig-mcp-extract refuse
+any source file or archive member with a `CUI_` path component; an operator
+who places sources by hand remains responsible for content that is controlled
+but not so named.
+
+DISA CCI list
+-------------
+
+The Control Correlation Identifier list is published by DISA on Cyber Exchange
+as the public download `U_CCI_List.zip`, from which stig-mcp-fetch extracts
+`U_CCI_List.xml`. The Privacy & Security statement quoted above applies to it.
+
+NIST SP 800-53 Revision 5 control catalog
+------------------------------------------
+
+The NIST SP 800-53 Revision 5 OSCAL control catalog
+(`nist_800_53_rev5_catalog.json`) is a work of the United States Government and
+is in the public domain within the United States. NIST additionally waives
+copyright and related rights in the work worldwide through the CC0 1.0
+Universal public domain dedication
+(https://creativecommons.org/publicdomain/zero/1.0/), per
+https://github.com/usnistgov/oscal-content/blob/main/LICENSE.md.

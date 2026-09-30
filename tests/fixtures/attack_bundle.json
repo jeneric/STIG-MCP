@@ -1,0 +1,87 @@
+{
+  "type": "bundle",
+  "id": "bundle--test",
+  "objects": [
+    {"type": "x-mitre-collection", "x_mitre_version": "15.1"},
+    {"type": "attack-pattern", "id": "attack-pattern--t1078",
+     "name": "Valid Accounts", "x_mitre_is_subtechnique": false,
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "defense-evasion"},
+                            {"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--t1078-001",
+     "name": "Default Accounts", "x_mitre_is_subtechnique": true,
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078.001"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--revoked",
+     "name": "Revoked Thing", "revoked": true,
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T9999"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--live-9000",
+     "name": "Replacement Technique",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T9000"}],
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "defense-evasion"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8001", "revoked": true,
+     "name": "Old One Hop",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8001"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8002", "revoked": true,
+     "name": "Old Chain Start",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8002"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8003", "revoked": true,
+     "name": "Replacement Technique Predecessor",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8003"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8004", "revoked": true,
+     "name": "Cycle A",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8004"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8005", "revoked": true,
+     "name": "Cycle B",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8005"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--revoked-8006", "revoked": true,
+     "name": "Dead End",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8006"}]},
+
+    {"type": "attack-pattern", "id": "attack-pattern--deprecated-8007", "x_mitre_deprecated": true,
+     "name": "Deprecated Target",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T8007"}]},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8001", "target_ref": "attack-pattern--live-9000"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8002", "target_ref": "attack-pattern--revoked-8003"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8003", "target_ref": "attack-pattern--live-9000"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8004", "target_ref": "attack-pattern--revoked-8005"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8005", "target_ref": "attack-pattern--revoked-8004"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8006", "target_ref": "attack-pattern--deprecated-8007"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--revoked-8001", "target_ref": "malware--not-a-technique"},
+
+    {"type": "relationship", "relationship_type": "revoked-by",
+     "source_ref": "attack-pattern--t1078", "target_ref": "attack-pattern--live-9000"},
+
+    {"type": "intrusion-set", "id": "intrusion-set--g0016",
+     "name": "APT29", "aliases": ["APT29", "Cozy Bear"],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "G0016"}]},
+    {"type": "intrusion-set", "id": "intrusion-set--g9999",
+     "name": "Deprecated Group", "x_mitre_deprecated": true, "aliases": ["Deprecated Group"],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "G9999"}]},
+    {"type": "relationship", "relationship_type": "uses",
+     "source_ref": "intrusion-set--g0016", "target_ref": "attack-pattern--t1078"},
+    {"type": "relationship", "relationship_type": "uses",
+     "source_ref": "intrusion-set--g9999", "target_ref": "attack-pattern--t1078"}
+  ]
+}

@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="Google_Chrome_Current_Windows">
+  <title>Google Chrome Current Windows Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-300001">
+    <Rule id="SV-300001r1_rule" severity="medium">
+      <title>Chrome must disable password manager.</title>
+      <description>&lt;VulnDiscussion&gt;Stored passwords are a credential theft target.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Set PasswordManagerEnabled to false.</fixtext>
+      <check><check-content>Verify PasswordManagerEnabled is false.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+</Benchmark>

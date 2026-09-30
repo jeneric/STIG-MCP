@@ -1,0 +1,28 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="RHEL_9_STIG">
+  <title>Red Hat Enterprise Linux 9 Security Technical Implementation Guide</title>
+  <version>1</version>
+  <plain-text id="release-info">Release: 1 Benchmark Date: 24 Jul 2024</plain-text>
+  <Group id="V-100001">
+    <Rule id="SV-100001r1_rule" severity="high">
+      <title>RHEL 9 must enable account management.</title>
+      <description>&lt;VulnDiscussion&gt;Automated account management reduces risk.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure automated account management.</fixtext>
+      <check><check-content>Verify automated account management is enabled.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000015</ident>
+    </Rule>
+  </Group>
+  <Group id="V-100002">
+    <Rule id="SV-100002r1_rule" severity="medium">
+      <title>RHEL 9 must display a logon banner.</title>
+      <description>&lt;VulnDiscussion&gt;A banner provides legal notice.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure the logon banner.</fixtext>
+      <check><check-content>Verify the logon banner is configured.</check-content></check>
+      <ident system="http://iase.disa.mil/cci">CCI-000048</ident>
+    </Rule>
+  </Group>
+  <Group id="V-100003">
+    <Rule id="SV-100003r1_rule">
+      <title>Malformed rule with no severity.</title>
+    </Rule>
+  </Group>
+</Benchmark>

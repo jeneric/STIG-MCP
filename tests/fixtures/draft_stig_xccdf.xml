@@ -1,0 +1,14 @@
+<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.1" id="BIND_9-x_STIG">
+  <status date="2025-03-03">draft</status>
+  <title>BIND 9.x Security Technical Implementation Guide</title>
+  <version>3</version>
+  <plain-text id="release-info">Release: 0.1 Benchmark Date: 06 Mar 2025</plain-text>
+  <Group id="V-310001">
+    <Rule id="SV-310001r1_rule" severity="medium">
+      <title>A draft requirement.</title>
+      <description>&lt;VulnDiscussion&gt;Not yet authoritative.&lt;/VulnDiscussion&gt;</description>
+      <fixtext>Configure it.</fixtext>
+      <check><check-content>Verify it.</check-content></check>
+    </Rule>
+  </Group>
+</Benchmark>

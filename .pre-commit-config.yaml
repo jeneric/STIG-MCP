@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key # Block committed key material
+      - id: check-added-large-files # Keep fetched source artifacts out of history
+      - id: check-merge-conflict # Refuse unresolved conflict markers
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22  # must equal the exact ruff pin (ruff==0.15.22) in pyproject.toml
+    hooks:
+      - id: ruff-check
+        args: [ --fix ] # Automatically fix style issues
+      - id: ruff-format # Natively format PEP 8 code layout

@@ -1,0 +1,11 @@
+<!-- tests/fixtures/test_stig_cci_list.xml -->
+<cci_list xmlns="http://iase.disa.mil/cci">
+  <cci_items>
+    <cci_item id="CCI-900001">
+      <definition>The organization manages information system accounts.</definition>
+      <references>
+        <reference creator="NIST" title="NIST SP 800-53 Revision 5" version="5" index="AC-2"/>
+      </references>
+    </cci_item>
+  </cci_items>
+</cci_list>
