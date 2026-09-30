@@ -106,7 +106,14 @@ def test_readme__example_prompts__are_exactly_three():
 def test_docs__relative_links__resolve():
     broken = []
     found = 0
-    for doc in [README, ROOT / "SECURITY.md", *(ROOT / "docs").glob("*.md"), *ROOT.glob("PRIVACY.md"), RELEASING]:
+    for doc in [
+        README,
+        ROOT / "SECURITY.md",
+        *(ROOT / "docs").glob("*.md"),
+        *ROOT.glob("PRIVACY.md"),
+        RELEASING,
+        ROOT / "CONTRIBUTING.md",
+    ]:
         for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", doc.read_text()):
             found += 1
             if "://" not in target and not (doc.parent / target).exists():

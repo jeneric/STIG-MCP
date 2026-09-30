@@ -201,6 +201,7 @@ from it:
 - [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md): for whoever installs, builds and maintains the knowledge base.
 - [docs/user-guide.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md): for a person talking to an LLM that has this server wired in.
 - [SECURITY.md](https://github.com/jeneric/STIG-MCP/blob/main/SECURITY.md): reporting a vulnerability, and what is in scope.
+- [CONTRIBUTING.md](https://github.com/jeneric/STIG-MCP/blob/main/CONTRIBUTING.md): working from a source checkout, running the tests, and the project's conventions.
 - [RELEASING.md](https://github.com/jeneric/STIG-MCP/blob/main/RELEASING.md): for the maintainer, publishing the package to PyPI and the MCP Registry.
 - [PRIVACY.md](https://github.com/jeneric/STIG-MCP/blob/main/PRIVACY.md): what the server and the fetch tool contact, and what is stored locally.
 
@@ -215,7 +216,3 @@ license text that notice requires.
 
 Developed with the assistance of Claude Code (Anthropic). All changes were reviewed and
 tested by the maintainer.
-
-## Tests
-
-    uv run pytest

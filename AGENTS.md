@@ -29,5 +29,9 @@ knowledge-base build walkthrough.
   `make clean`
 - Ensure the repository tree is completely pristine and that no untracked `.coverage` or cache data files leak into production distribution packages.
 
+## Conventions
+- **Comments** explain only what the code cannot show, such as the reason behind a non-obvious decision, in the present tense. They never recount how the code got that way.
+- **Error messages** say what the caller must change, and come from the call that must change.
+
 ## Style Guide
 - **Commit Messages:** Write concise, single-line messages using the imperative mood (e.g., "fix bug"). Do not include body text, explanations, or markdown formatting.
