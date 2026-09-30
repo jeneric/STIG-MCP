@@ -229,3 +229,13 @@ def test_payload__uvx_without_distribution_metadata__falls_back_to_the_script(tm
     monkeypatch.setattr(readiness, "version", missing)
     first = readiness.payload(tmp_path / "absent.sqlite", "no_knowledge_base")["next"][0]
     assert first["as_installed"] == "stig-mcp-install-kb"
+
+
+def test_launch_mode__no_arguments_under_uvx__reads_the_running_environment(tmp_path, monkeypatch):
+    cache = tmp_path / "cache" / "uv"
+    cache.mkdir(parents=True)
+    (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    prefix = cache / "archive-v0" / "w7Sh9G-JXJ2ykMMp"
+    monkeypatch.setattr(readiness, "_PACKAGE_DIR", _package_in(prefix))
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    assert readiness._launch_mode() == "uvx"
