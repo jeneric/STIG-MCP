@@ -12,7 +12,7 @@ server runs.
 import os
 import sqlite3
 import sys
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from stig_mcp.ingest import config, inventory
@@ -68,7 +68,8 @@ def _launch_mode(prefix=None, package_dir=None):
     if config.checkout_root(package_dir) is not None:
         return "checkout"
     # uvx runs from a disposable environment in uv's cache, whose root carries a CACHEDIR.TAG.
-    # Its scripts are on the server's PATH but not on the user's.
+    # Its scripts are on the server's PATH but not on the user's. Only ancestors count: uv also
+    # tags each venv's own root, including a uv tool install's.
     if any((parent / "CACHEDIR.TAG").is_file() for parent in prefix.parents):
         return "uvx"
     return "installed"
@@ -79,8 +80,12 @@ def _as_installed(script):
     if mode == "checkout":
         return f"uv run {script}"
     if mode == "uvx":
+        try:
+            running = version("stig-mcp")
+        except PackageNotFoundError:
+            return script
         # Pinned, so the command cannot fetch a release that writes a different schema.
-        return f"uvx --from stig-mcp=={version('stig-mcp')} {script}"
+        return f"uvx --from stig-mcp=={running} {script}"
     return script
 
 

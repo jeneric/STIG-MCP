@@ -3,7 +3,7 @@ import subprocess
 import sys
 import tomllib
 from contextlib import closing
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pytest
@@ -196,3 +196,36 @@ def test_payload__each_launch_mode__names_the_command_a_person_can_run(tmp_path,
     monkeypatch.setattr(readiness, "_launch_mode", lambda: mode)
     first = readiness.payload(tmp_path / "absent.sqlite", "no_knowledge_base")["next"][0]
     assert first["as_installed"] == expected
+
+
+def test_launch_mode__tag_in_the_environment_itself__is_installed(tmp_path):
+    # uv tags every venv it creates at the venv's own root, so a uv tool install carries one.
+    prefix = tmp_path / "tools" / "stig-mcp"
+    package_dir = _package_in(prefix)
+    (prefix / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    assert readiness._launch_mode(prefix, package_dir) == "installed"
+
+
+def test_launch_mode__checkout_package_in_a_cached_environment__is_checkout(tmp_path):
+    # `uv run --isolated` in a checkout: the environment is in the cache, the code is not.
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "stig-mcp"\n')
+    (tmp_path / "stig_mcp").mkdir()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    assert readiness._launch_mode(cache / "archive-v0" / "id", tmp_path / "stig_mcp") == "checkout"
+
+
+def test_launch_mode__no_arguments__reads_this_checkout():
+    assert readiness._launch_mode() == "checkout"
+
+
+def test_payload__uvx_without_distribution_metadata__falls_back_to_the_script(tmp_path, monkeypatch):
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    monkeypatch.setattr(readiness, "_launch_mode", lambda: "uvx")
+    monkeypatch.setattr(readiness, "version", missing)
+    first = readiness.payload(tmp_path / "absent.sqlite", "no_knowledge_base")["next"][0]
+    assert first["as_installed"] == "stig-mcp-install-kb"
