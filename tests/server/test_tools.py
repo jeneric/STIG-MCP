@@ -1113,7 +1113,7 @@ def test_every_public_tool__no_knowledge_base__returns_not_ready_rather_than_rai
         # readiness._SCRIPTS is keyed the same as _MODULES but the two dicts could disagree
         # with each other and no set-membership check on either alone would notice a step
         # whose as_installed names a different command than its own run module does.
-        steps = {step["as_installed"]: step["run"] for step in body["next"]}
+        steps = {step["as_installed"].split()[-1]: step["run"] for step in body["next"]}
         assert steps.keys() == {"stig-mcp-install-kb", "stig-mcp-fetch", "stig-mcp-ingest"}
         assert steps["stig-mcp-install-kb"].endswith("stig_mcp.kb.install")
         assert steps["stig-mcp-fetch"].endswith("stig_mcp.ingest.fetch")

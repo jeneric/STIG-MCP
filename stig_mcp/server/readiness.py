@@ -12,6 +12,8 @@ server runs.
 import os
 import sqlite3
 import sys
+from importlib.metadata import version
+from pathlib import Path
 
 from stig_mcp.ingest import config, inventory
 from stig_mcp.kb.db import SCHEMA_VERSION, open_db
@@ -24,6 +26,7 @@ _MODULES = {
     "ingest": "stig_mcp.ingest.orchestrator",
 }
 _SCRIPTS = {"install": "stig-mcp-install-kb", "fetch": "stig-mcp-fetch", "ingest": "stig-mcp-ingest"}
+_PACKAGE_DIR = Path(__file__).resolve().parent.parent
 
 
 def identity(kb_path):
@@ -58,11 +61,34 @@ def check(kb_path):
     return READY if found == SCHEMA_VERSION else "schema_outdated"
 
 
+def _launch_mode(prefix=None, package_dir=None):
+    """How this copy is installed: "checkout", "uvx" or "installed"."""
+    prefix = Path(sys.prefix) if prefix is None else prefix
+    package_dir = _PACKAGE_DIR if package_dir is None else package_dir
+    if config.checkout_root(package_dir) is not None:
+        return "checkout"
+    # uvx runs from a disposable environment in uv's cache, whose root carries a CACHEDIR.TAG.
+    # Its scripts are on the server's PATH but not on the user's.
+    if any((parent / "CACHEDIR.TAG").is_file() for parent in prefix.parents):
+        return "uvx"
+    return "installed"
+
+
+def _as_installed(script):
+    mode = _launch_mode()
+    if mode == "checkout":
+        return f"uv run {script}"
+    if mode == "uvx":
+        # Pinned, so the command cannot fetch a release that writes a different schema.
+        return f"uvx --from stig-mcp=={version('stig-mcp')} {script}"
+    return script
+
+
 def _step(key, why):
-    # Both forms, deliberately. `run` is what an agent should execute and works from an
-    # isolated install because sys.executable provably has the package; `as_installed` is
-    # what a human reads and what the documentation uses.
-    return {"why": why, "run": f"{sys.executable} -m {_MODULES[key]}", "as_installed": _SCRIPTS[key]}
+    # Both forms, deliberately. `run` is what an agent should execute and works for as long as
+    # this server runs, because sys.executable provably has the package; `as_installed` is what
+    # a person can run later from their own terminal.
+    return {"why": why, "run": f"{sys.executable} -m {_MODULES[key]}", "as_installed": _as_installed(_SCRIPTS[key])}
 
 
 def _install_step():

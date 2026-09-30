@@ -56,8 +56,10 @@ It starts whether or not the knowledge base exists, and it never answers from on
 cannot trust. Called before the knowledge base is installed, or against one an older release
 wrote, every tool returns a `not_ready` payload instead of an answer: the reason, which
 source files it can and cannot see, the sources directory it looked in, and the next steps,
-led by the `install_knowledge_base` tool and followed by the commands to run, each in both its
-console-script and `python -m` form. That is deliberate, so an agent can read the remedy from
+led by the `install_knowledge_base` tool and followed by the commands to run. Each command
+comes in two forms: `run`, which works from the server's own environment, and `as_installed`,
+which a person can type into a terminal, written for how the server was installed (`uvx`, a
+checkout, or an installed copy). That is deliberate, so an agent can read the remedy from
 the tool result rather than the operator having to find a log pane. Install or rebuild the
 knowledge base and the running server picks it up without a restart.
 

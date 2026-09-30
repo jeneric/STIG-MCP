@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tomllib
 from contextlib import closing
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,8 @@ def test_payload__every_named_command__actually_runs(tmp_path, monkeypatch):
         # The PAIRING, not just membership: `x in _console_scripts()` passes with the two
         # values in readiness._SCRIPTS swapped, because both names are in the table either way.
         # The console script and the `-m` module have to name the same entry point.
-        assert _console_scripts()[step["as_installed"]].split(":")[0] == step["run"].split(" -m ")[1]
+        script = step["as_installed"].split()[-1]
+        assert _console_scripts()[script].split(":")[0] == step["run"].split(" -m ")[1]
 
 
 def test_payload__a_stale_schema__tells_the_caller_to_rebuild(kb_path, tmp_path, monkeypatch):
@@ -135,6 +137,7 @@ def test_check__a_valid_sqlite_file_with_no_ingest_meta__is_unreadable(tmp_path)
 @pytest.mark.parametrize("reason", ["no_knowledge_base", "schema_outdated", "unreadable"])
 def test_payload__every_reason__names_the_install_tool_first(tmp_path, monkeypatch, reason):
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    monkeypatch.setattr(readiness, "_launch_mode", lambda: "installed")
     first = readiness.payload(tmp_path / "absent.sqlite", reason)["next"][0]
     assert first["tool"] == "install_knowledge_base"
     assert first["as_installed"] == "stig-mcp-install-kb"
@@ -142,11 +145,54 @@ def test_payload__every_reason__names_the_install_tool_first(tmp_path, monkeypat
 
 def test_payload__no_knowledge_base__keeps_fetch_and_ingest_as_the_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    monkeypatch.setattr(readiness, "_launch_mode", lambda: "installed")
     steps = readiness.payload(tmp_path / "absent.sqlite", "no_knowledge_base")["next"]
     assert [step["as_installed"] for step in steps] == ["stig-mcp-install-kb", "stig-mcp-fetch", "stig-mcp-ingest"]
 
 
 def test_payload__schema_outdated__offers_install_then_rebuild(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    monkeypatch.setattr(readiness, "_launch_mode", lambda: "installed")
     steps = readiness.payload(tmp_path / "absent.sqlite", "schema_outdated")["next"]
     assert [step["as_installed"] for step in steps] == ["stig-mcp-install-kb", "stig-mcp-ingest"]
+
+
+def _package_in(prefix):
+    package_dir = prefix / "lib" / "python3.13" / "site-packages" / "stig_mcp"
+    package_dir.mkdir(parents=True)
+    return package_dir
+
+
+def test_launch_mode__package_beside_its_pyproject__is_checkout(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "stig-mcp"\n')
+    (tmp_path / "stig_mcp").mkdir()
+    assert readiness._launch_mode(tmp_path / ".venv", tmp_path / "stig_mcp") == "checkout"
+
+
+def test_launch_mode__environment_inside_a_tagged_cache__is_uvx(tmp_path):
+    # The layout uvx produced on a real run: ~/.cache/uv/archive-v0/<id>, with the tag at ~/.cache/uv.
+    cache = tmp_path / "cache" / "uv"
+    cache.mkdir(parents=True)
+    (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    prefix = cache / "archive-v0" / "w7Sh9G-JXJ2ykMMp"
+    assert readiness._launch_mode(prefix, _package_in(prefix)) == "uvx"
+
+
+def test_launch_mode__environment_outside_any_cache__is_installed(tmp_path):
+    prefix = tmp_path / "tools" / "stig-mcp"
+    assert readiness._launch_mode(prefix, _package_in(prefix)) == "installed"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("checkout", "uv run stig-mcp-install-kb"),
+        ("uvx", f"uvx --from stig-mcp=={version('stig-mcp')} stig-mcp-install-kb"),
+        ("installed", "stig-mcp-install-kb"),
+    ],
+)
+def test_payload__each_launch_mode__names_the_command_a_person_can_run(tmp_path, monkeypatch, mode, expected):
+    monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    monkeypatch.setattr(readiness, "_launch_mode", lambda: mode)
+    first = readiness.payload(tmp_path / "absent.sqlite", "no_knowledge_base")["next"][0]
+    assert first["as_installed"] == expected
