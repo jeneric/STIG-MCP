@@ -419,10 +419,11 @@ first. While no release is published, the install refuses and names `stig-mcp-fe
 
 #### Upgrading stig-mcp
 
-From a source checkout, run `git pull` and `uv sync`, restart the server from the client,
-then call `install_knowledge_base`. A newer stig-mcp may read a newer schema, and until a
-matching knowledge base is installed every tool reports `schema_outdated` and names the
-install tool. Other install channels will be documented when they are published.
+`uvx` keeps running the version it has cached. To move to the newest release, run
+`uvx --from stig-mcp@latest stig-mcp-install-kb --help`, which refreshes uv's copy. From a
+source checkout, run `git pull` and `uv sync`. Either way, restart the server from the client,
+then call `install_knowledge_base`. A newer stig-mcp may read a newer schema, and until a matching
+knowledge base is installed every tool reports `schema_outdated` and names the install tool.
 
 ## When a STIG is no longer current
 

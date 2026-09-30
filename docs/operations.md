@@ -2,10 +2,10 @@
 
 For whoever installs, builds and maintains the STIG-MCP knowledge base.
 
-This document is written for a source checkout, which is how the project is normally run: it
-spells paths as a checkout has them and prefixes every command with `uv run`. An installed
-copy keeps its data elsewhere, because `site-packages` is the wrong home for gigabyte-scale
-downloads, and runs the entry points without the `uv run` prefix. See the README's
+This document is written for a source checkout: it spells paths as a checkout has them and
+prefixes every command with `uv run`. An installed copy keeps its data elsewhere, because
+`site-packages` is the wrong home for gigabyte-scale downloads. It runs the entry points
+without the `uv run` prefix, or, when run through `uvx`, as `uvx --from stig-mcp <command>`. See the README's
 "Where the data lives" for the locations and the two environment variables that override
 them.
 

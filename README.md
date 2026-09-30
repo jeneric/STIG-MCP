@@ -8,21 +8,26 @@ the systems under consideration, severity-ordered.
 
 ## Install
 
-This project uses [UV](https://docs.astral.sh/uv/). Install dependencies with:
+stig-mcp is on [PyPI](https://pypi.org/project/stig-mcp/). With
+[uv](https://docs.astral.sh/uv/), a client runs it with no separate install step:
+
+    uvx stig-mcp
+
+From a source checkout instead, install the dependencies with:
 
     uv sync
 
+The commands below are written for a checkout (`uv run ...`). Without one, run the same entry
+point with `uvx --from stig-mcp`, for example `uvx --from stig-mcp stig-mcp-install-kb`.
+
 ## Quickstart
 
-1. `uv sync`: install dependencies, then wire the server into a client (see "Run the
-   server" below) and start it.
+1. Wire the server into a client (see "Run the server" below) and start it.
 2. Ask the agent to install the knowledge base. It calls the `install_knowledge_base`
    tool, which downloads the newest published release from this project's GitHub releases
    and verifies its SHA-256 before installing it. From a terminal the same is
    `uv run stig-mcp-install-kb`. A host that cannot reach GitHub installs from a file; see
-   [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md), "Install a prebuilt knowledge base". Until the
-   first knowledge-base release is published, the install says so and names the build
-   commands in the next step.
+   [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md), "Install a prebuilt knowledge base".
 3. Or build it yourself: `uv run stig-mcp-fetch` downloads ATT&CK, the CTID mapping, the
    800-53 catalog, and DISA's STIG content. **This transfers roughly a gigabyte** and
    refuses to start with less than 2 GiB free. Then `uv run stig-mcp-ingest` builds the
@@ -40,7 +45,9 @@ Neither rebuilds the knowledge base; see "Keeping current" in the same document.
 
 ## Run the server
 
-    uv run stig-mcp
+    uvx stig-mcp
+
+or, from a checkout, `uv run stig-mcp`.
 
 This is a stdio MCP server: it speaks JSON-RPC on stdin/stdout and logs to stderr,
 so it is launched by an MCP client rather than run standalone.
@@ -60,7 +67,22 @@ only this project's GitHub releases.
 
 ### GitHub Copilot in VS Code
 
-Create `.vscode/mcp.json` in this repository (git-ignored, so it stays local):
+Run **MCP: Open User Configuration** from the Command Palette and add:
+
+```json
+{
+  "servers": {
+    "stig-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["stig-mcp"]
+    }
+  }
+}
+```
+
+From a checkout, create `.vscode/mcp.json` in this repository instead (git-ignored, so it
+stays local):
 
 ```json
 {
@@ -93,32 +115,35 @@ manual permissions it asks to read a file named like `…copilot-tool-output-…
 outside the workspace. That file is this server's answer; allow it.
 
 To debug, run **MCP: List Servers**, select the server, and choose **Show Output**.
-The two common failures are that `uv` is not on the `PATH` VS Code inherited, which
-looks like a broken server but is a missing command, and an absent knowledge base.
-For the first, use uv's absolute path (`which uv`) as `command`. For the second, see
+The two common failures are that `uvx` or `uv` is not on the `PATH` VS Code inherited,
+which looks like a broken server but is a missing command, and an absent knowledge base.
+For the first, use the absolute path (`which uvx` or `which uv`) as `command`. For the second, see
 [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md).
 
 ### Other clients
 
-Any MCP client that launches a stdio server works. `uv run` locates the project from
-the working directory, so a client that starts elsewhere needs `--directory`, which
-makes the command independent of where it is launched:
+Any MCP client that launches a stdio server works, with `uvx stig-mcp` as the command. For
+Claude Code:
+
+    claude mcp add stig-mcp -- uvx stig-mcp
+
+From a checkout, `uv run` locates the project from the working directory, so a client that
+starts elsewhere needs `--directory`, which makes the command independent of where it is
+launched:
 
     uv run --directory /path/to/STIG-MCP stig-mcp
 
-For Claude Code, from the repository root:
+or, from the repository root, `claude mcp add stig-mcp -- uv run stig-mcp`.
 
-    claude mcp add stig-mcp -- uv run stig-mcp
-
-By default the knowledge base is not found relative to the working directory, so only `uv`
-cares where the client starts the server. Where it *is* found depends on whether this is a
+By default the knowledge base is not found relative to the working directory, so only
+`uv run` cares where the client starts the server. Where it *is* found depends on whether this is a
 checkout or an installed copy. (A relative `STIG_MCP_DATA` does resolve against the working
 directory, so give it an absolute path if the client's is not yours.)
 
 ### Where the data lives
 
 Two environment variables override the defaults, and the defaults differ between a source
-checkout and an installed copy:
+checkout and an installed copy (which includes `uvx stig-mcp`):
 
 | | source checkout | installed, POSIX and macOS | installed, Windows |
 |---|---|---|---|
