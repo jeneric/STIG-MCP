@@ -46,4 +46,9 @@ all of them builds a new version.
 A release also bumps the Claude Code plugin: `version` in
 `plugins/stig-mcp/.claude-plugin/plugin.json` and the `stig-mcp==` pin in
 `plugins/stig-mcp/.mcp.json` both name the new version. `tests/test_plugin.py` fails until they
-match `pyproject.toml`, so CI on `main` catches a missed bump before the tag.
+match `pyproject.toml`; CI on `main` and the publish workflow's build job both run it.
+
+Claude Code reads the plugin from `main`, so from the release commit's push until PyPI serves
+the version, a plugin install fails with uvx's "no version of stig-mcp==..." error. Push the tag
+and approve the `pypi` deployment promptly. If the release cannot be published, revert the
+plugin's two version changes in a new commit on `main` until it can.

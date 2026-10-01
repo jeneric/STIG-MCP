@@ -113,3 +113,14 @@ def test_publish_workflow__registry__checks_pypi_serves_the_build_before_publish
     publish = next(i for i, r in enumerate(runs) if "mcp-publisher publish" in r)
     assert "--index-url https://pypi.org" in runs[check]
     assert check < publish
+
+
+def test_publish_workflow__build__checks_the_plugin_pin_before_building():
+    # The marketplace serves the plugin from main, so a tag pushed without waiting for CI
+    # could publish a release whose plugin still pins the previous version.
+    runs = [step.get("run", "") for step in _steps("build")]
+    (check,) = [i for i, run in enumerate(runs) if "pytest" in run and "tests/test_plugin.py" in run]
+    (build,) = [i for i, run in enumerate(runs) if "uv build" in run]
+    # Before the dry run rewrites the version to .devN, which no plugin pin matches.
+    (dev_version,) = [i for i, run in enumerate(runs) if ".dev" in run]
+    assert check < dev_version < build

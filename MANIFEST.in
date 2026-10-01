@@ -1,3 +1,6 @@
 # setuptools adds tests/test*.py to the sdist implicitly. The suite needs its fixtures,
 # conftest subtree and tools/ to run, so ship none of it; build from the git tag to test.
 prune tests
+# Claude Code reads the plugin from the repository, never from the package.
+prune plugins
+prune .claude-plugin

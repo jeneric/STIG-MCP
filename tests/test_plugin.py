@@ -46,3 +46,8 @@ def test_plugin_readme__links__are_absolute():
     links = re.findall(r"\]\(([^)\s]+)\)", (_plugin_dir() / "README.md").read_text())
     assert links, "the link pattern matched nothing, so no link was checked"
     assert [link for link in links if "://" not in link] == []
+
+
+def test_plugin__descriptions__match_pyproject():
+    summary = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["description"]
+    assert _manifest()["description"] == _entry()["description"] == summary

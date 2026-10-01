@@ -133,7 +133,8 @@ the second, see [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/ma
 ### Other clients
 
 Any MCP client that launches a stdio server works, with `uvx stig-mcp` as the command. For
-Claude Code, install the plugin from this repository's marketplace, inside a session:
+Claude Code, install the plugin from this repository's marketplace, inside a session (Claude
+Code 2.1.275 or later):
 
     /plugin install stig-mcp --marketplace jeneric/STIG-MCP
 

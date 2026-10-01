@@ -319,9 +319,10 @@ _VSCODE_BADGE = re.compile(r"\]\((https://(?:insiders\.)?vscode\.dev/redirect/mc
 
 
 def test_readme__vscode_badges__install_the_documented_configuration():
-    section = _section(README.read_text(), "GitHub Copilot in VS Code")
+    readme = README.read_text()
+    section = _section(readme, "GitHub Copilot in VS Code")
     documented = json.loads(re.search(r"```json\n(.*?)```", section, re.S).group(1))["servers"]["stig-mcp"]
-    links = _VSCODE_BADGE.findall(section)
+    links = _VSCODE_BADGE.findall(readme)
     assert links, "the GitHub Copilot section has no VS Code install badge"
     for link in links:
         query = parse_qs(urlparse(link).query)

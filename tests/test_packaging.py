@@ -163,6 +163,12 @@ def test_built_sdist__tools_and_operator_data__ship_nothing(sdist_members):
     assert not shipped
 
 
+def test_built_sdist__claude_plugin_files__ship_nothing(sdist_members):
+    # The plugin is served from the repository by Claude Code, never from the package.
+    shipped = sorted(str(m) for m in sdist_members if m.parts[0] in ("plugins", ".claude-plugin"))
+    assert shipped == []
+
+
 def test_built_sdist__notices_and_readme__are_all_present(sdist_members):
     required = {
         Path("README.md"),
