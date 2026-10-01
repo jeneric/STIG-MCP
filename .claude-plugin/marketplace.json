@@ -1,0 +1,12 @@
+{
+  "name": "stig-mcp",
+  "description": "The stig-mcp MCP server for Claude Code",
+  "owner": { "name": "Eric Miller" },
+  "plugins": [
+    {
+      "name": "stig-mcp",
+      "source": "./plugins/stig-mcp",
+      "description": "MCP server mapping MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps"
+    }
+  ]
+}

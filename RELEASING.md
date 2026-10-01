@@ -42,3 +42,8 @@ approval.
 Then start a dry run with `gh workflow run publish.yml` and follow it with
 `gh run watch`. If a run fails after its upload, re-run only the failed jobs: re-running
 all of them builds a new version.
+
+A release also bumps the Claude Code plugin: `version` in
+`plugins/stig-mcp/.claude-plugin/plugin.json` and the `stig-mcp==` pin in
+`plugins/stig-mcp/.mcp.json` both name the new version. `tests/test_plugin.py` fails until they
+match `pyproject.toml`, so CI on `main` catches a missed bump before the tag.
