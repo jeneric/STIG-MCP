@@ -13,6 +13,10 @@ stig-mcp is on [PyPI](https://pypi.org/project/stig-mcp/). With
 
     uvx stig-mcp
 
+`uvx` comes with uv; [install uv](https://docs.astral.sh/uv/getting-started/installation/)
+first if `uvx --version` does not run. The VS Code badge and the Claude Code plugin below both
+need it.
+
 From a source checkout instead, install the dependencies with:
 
     uv sync
@@ -69,7 +73,9 @@ only this project's GitHub releases.
 
 ### GitHub Copilot in VS Code
 
-Run **MCP: Open User Configuration** from the Command Palette and add:
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_stig--mcp-0098FF?logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=stig-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22stig-mcp%22%5D%7D)
+
+Or run **MCP: Open User Configuration** from the Command Palette and add:
 
 ```json
 {
@@ -119,13 +125,21 @@ outside the workspace. That file is this server's answer; allow it.
 To debug, run **MCP: List Servers**, select the server, and choose **Show Output**.
 The two common failures are that `uvx` or `uv` is not on the `PATH` VS Code inherited,
 which looks like a broken server but is a missing command, and an absent knowledge base.
-For the first, use the absolute path (`which uvx` or `which uv`) as `command`. For the second, see
-[docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md).
+For the first, use the absolute path (`which uvx` or `which uv`) as `command`. A missing
+`uvx` shows in VS Code's output as `Connection state: Error spawn uvx ENOENT`, and in
+`claude mcp list` as `Failed to connect — ENOENT: Executable not found in $PATH: "uvx"`. For
+the second, see [docs/operations.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/operations.md).
 
 ### Other clients
 
 Any MCP client that launches a stdio server works, with `uvx stig-mcp` as the command. For
-Claude Code:
+Claude Code, install the plugin from this repository's marketplace, inside a session:
+
+    /plugin install stig-mcp --marketplace jeneric/STIG-MCP
+
+or from a shell, `claude plugin marketplace add jeneric/STIG-MCP` then
+`claude plugin install stig-mcp@stig-mcp`. The plugin pins the current release, and
+`claude plugin update stig-mcp@stig-mcp` moves it to the next one. Without the plugin:
 
     claude mcp add stig-mcp -- uvx stig-mcp
 

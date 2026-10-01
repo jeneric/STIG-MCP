@@ -1,8 +1,10 @@
 """Facts the documentation states that the code decides. Each test extracts the value from the
 document and compares it with the code, so the two cannot drift apart unnoticed."""
 
+import json
 import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from stig_mcp.kb import freshness, releases
 from stig_mcp.server import app as app_module
@@ -311,3 +313,25 @@ def test_user_guide__tools_list__names_every_registered_tool_with_its_parameters
         for tool in asyncio.run(app_module.build_server(tmp_path / "absent.sqlite").list_tools())
     }
     assert listed == registered
+
+
+_VSCODE_BADGE = re.compile(r"\]\((https://(?:insiders\.)?vscode\.dev/redirect/mcp/install\?[^)\s]+)\)")
+
+
+def test_readme__vscode_badges__install_the_documented_configuration():
+    section = _section(README.read_text(), "GitHub Copilot in VS Code")
+    documented = json.loads(re.search(r"```json\n(.*?)```", section, re.S).group(1))["servers"]["stig-mcp"]
+    links = _VSCODE_BADGE.findall(section)
+    assert links, "the GitHub Copilot section has no VS Code install badge"
+    for link in links:
+        query = parse_qs(urlparse(link).query)
+        assert query["name"] == ["stig-mcp"]
+        assert (
+            json.loads(query["config"][0])
+            == documented
+            == {
+                "type": "stdio",
+                "command": "uvx",
+                "args": ["stig-mcp"],
+            }
+        )
