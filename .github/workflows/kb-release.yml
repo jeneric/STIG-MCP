@@ -106,7 +106,7 @@ jobs:
           fi
           uv run python -m tools.kb_release build --tag "$TAG" \
             --out "$RUNNER_TEMP/release" --event "${{ github.event_name }}" \
-            "${previous[@]}" --github-output "$GITHUB_OUTPUT"
+            "${previous[@]}" --github-output "$GITHUB_OUTPUT" --step-summary "$GITHUB_STEP_SUMMARY"
 
       - name: Replace unpublished drafts
         if: steps.build.outputs.changed == 'true'

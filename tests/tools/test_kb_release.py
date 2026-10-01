@@ -130,13 +130,34 @@ def test_notes__a_previous_release__lists_added_changed_and_dropped_benchmarks()
             {"stig_id": "New", "version": "1", "release": "V1R1", "file": "f"},
         ],
     }
-    verified = {"tripwire": {"stale": [], "other_major": ["U_Foo_V3R1_STIG.zip"], "unmatched": []}}
-    text = kb_release.notes(doc, previous, "kb-2026-09-28", f"kb-{TODAY}", verified)
-    assert "Added (1): New V1R1" in text
-    assert "Changed (1): Bumped V2R8 -> V2R9" in text
-    assert "Dropped (1): Gone V1R4" in text
-    assert "U_Foo_V3R1_STIG.zip" in text
+    text = kb_release.notes(doc, previous, "kb-2026-09-28", f"kb-{TODAY}")
+    assert "### Added (1)\n- New V1R1\n" in text
+    assert "### Changed (1)\n- Bumped V2R8 -> V2R9\n" in text
+    assert "### Dropped (1)\n- Gone V1R4\n" in text
     assert "Kept" not in text
+
+
+def test_notes__several_changes__puts_each_benchmark_on_its_own_bullet():
+    previous = {"upstream": {}, "benchmarks": [{"stig_id": "B", "version": "1", "release": "V1R1", "file": "f"}]}
+    doc = {
+        "built_with": "0.1.0",
+        "upstream": {},
+        "sha256": {"xz": "x" * 64, "sqlite": "s" * 64},
+        "benchmarks": [
+            {"stig_id": "A", "version": "1", "release": "V1R1", "file": "f"},
+            {"stig_id": "C", "version": "1", "release": "V1R2", "file": "f"},
+        ],
+    }
+    text = kb_release.notes(doc, previous, "kb-2026-09-28", f"kb-{TODAY}")
+    assert "### Added (2)\n- A V1R1\n- C V1R2\n" in text
+    assert "### Changed (0)\n- none\n" in text
+    assert "### Dropped (1)\n- B V1R1\n" in text
+
+
+def test_notes__any_release__lists_benchmarks_before_upstream():
+    doc = {"built_with": "0.1.0", "upstream": {"attack": "19.2"}, "sha256": {"xz": "x" * 64, "sqlite": "s" * 64}}
+    text = kb_release.notes({**doc, "benchmarks": []}, None, None, f"kb-{TODAY}")
+    assert text.index("## Benchmarks") < text.index("## Upstream")
 
 
 def test_notes__no_previous_release__says_so_and_counts_the_benchmarks():
@@ -146,17 +167,36 @@ def test_notes__no_previous_release__says_so_and_counts_the_benchmarks():
         "sha256": {"xz": "x" * 64, "sqlite": "s" * 64},
         "benchmarks": [{"stig_id": "A", "version": "1", "release": "V1R1", "file": "f"}],
     }
-    verified = {"tripwire": {"stale": [], "other_major": [], "unmatched": []}}
-    text = kb_release.notes(doc, None, None, f"kb-{TODAY}", verified)
+    text = kb_release.notes(doc, None, None, f"kb-{TODAY}")
     assert f"First release for schema {SCHEMA_VERSION}: 1 benchmark(s)." in text
 
 
-def test_notes__unmatched_on_the_index__names_the_renamed_product_wording():
-    doc = {"built_with": "0.1.0", "upstream": {}, "sha256": {"xz": "x" * 64, "sqlite": "s" * 64}, "benchmarks": []}
-    verified = {"tripwire": {"stale": [], "other_major": [], "unmatched": ["U_Old_Name_V1R1_STIG.zip"]}}
-    text = kb_release.notes(doc, None, None, f"kb-{TODAY}", verified)
-    assert "U_Old_Name_V1R1_STIG.zip" in text
-    assert "On DISA's index under a name no stored benchmark came from" in text
+def test_tripwireSummary__names_on_the_index__lists_each_under_its_heading():
+    wire = {
+        "stale": [],
+        "other_major": ["U_Foo_V3R1_STIG.zip"],
+        "unmatched": ["U_Old_V1R1_STIG.zip", "U_Older_V1R2_STIG.zip"],
+    }
+    text = kb_release.tripwire_summary(wire)
+    assert "### Newer major on the index, library major kept (1)\n- `U_Foo_V3R1_STIG.zip`\n" in text
+    assert "came from (usually an older name) (2)\n- `U_Old_V1R1_STIG.zip`\n- `U_Older_V1R2_STIG.zip`\n" in text
+
+
+def test_tripwireSummary__nothing_unmatched__says_none_under_each_heading():
+    text = kb_release.tripwire_summary({"stale": [], "other_major": [], "unmatched": []})
+    assert text.count("(0)\n- none\n") == 2
+
+
+def test_build__an_unmatched_index_name__goes_to_the_step_summary_not_the_notes(kb_path, tmp_path, monkeypatch):
+    kb, sources = _build_inputs(kb_path, tmp_path, monkeypatch)
+    out = tmp_path / "release"
+    summary = tmp_path / "summary.md"
+    summary.write_text("earlier step\n")
+    kb_release.build(f"kb-{TODAY}", out, kb_path=kb, sources_dir=sources, version="0.1.0", step_summary=summary)
+    assert "U_Foo_V1R1_STIG.zip" not in (out / "notes.md").read_text()
+    written = summary.read_text()
+    assert written.startswith("earlier step\n")
+    assert "(1)\n- `U_Foo_V1R1_STIG.zip`\n" in written
 
 
 def test_build__a_verified_build__writes_assets_notes_and_the_upload_list(kb_path, tmp_path, monkeypatch):
@@ -293,11 +333,14 @@ def test_main__build__writes_changed_to_github_output_and_reads_config_paths(kb_
             "kb-2026-09-28",
             "--github-output",
             str(output),
+            "--step-summary",
+            str(tmp_path / "summary.md"),
         ]
     )
     assert code == 0
     assert output.read_text() == "changed=false\n"
     assert "Since kb-2026-09-28:" in (tmp_path / "second" / "notes.md").read_text()
+    assert "## Freshness tripwire notes" in (tmp_path / "summary.md").read_text()
 
 
 def test_main__decide_with_a_malformed_previous_release__exits_1_naming_release_json(tmp_path, capsys):

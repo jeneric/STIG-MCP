@@ -388,7 +388,7 @@ A build then does, in order:
    tripwire must pass: no benchmark on DISA's index may be at a newer release than the
    knowledge base holds for the same product and major. A benchmark on the index under
    another major, or under a name no stored benchmark came from (usually the old name of a
-   renamed product), is listed in the release notes and does not fail the build.
+   renamed product), is listed in the run's Actions job summary and does not fail the build.
 6. Packaging, in `tools/kb_package.py`: the knowledge base compressed as
    `stig_kb-schema<N>-<date>.sqlite.xz`, a `SHA256SUMS` listing it and the decompressed
    `.sqlite`, a `release.json` (schema, `built_with`, both SHA-256 values, the upstream source
@@ -400,8 +400,8 @@ versions, benchmarks and source digests, the build is unchanged and the run draf
 unless it was started by hand from the Actions tab (`workflow_dispatch`), which always
 drafts. Otherwise it deletes every `kb-*` draft still waiting, refusing if one has been
 published meanwhile, then drafts a release tagged `kb-` and the UTC date, with those assets
-and notes naming the upstream versions, the benchmarks added, changed and dropped since the
-newest published release, the tripwire's notes and both SHA-256 values. It records the
+and notes listing the benchmarks added, changed and dropped since the newest published
+release, one per line, then the upstream versions and both SHA-256 values. It records the
 draft on the `kb-latest` branch in `kb/LATEST`: the tag, the schema and the decompressed
 knowledge base's SHA-256.
 

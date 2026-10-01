@@ -103,27 +103,31 @@ def _diff_lines(doc, previous, previous_tag):
     changed = [f"{i} {before[i]} -> {now[i]}" for i in sorted(now.keys() & before.keys()) if now[i] != before[i]]
     lines = [f"Since {previous_tag}:"]
     for label, items in (("Added", added), ("Changed", changed), ("Dropped", dropped)):
-        lines.append(f"- {label} ({len(items)}): {'; '.join(items) if items else 'none'}")
+        lines += ["", f"### {label} ({len(items)})", *(f"- {item}" for item in items or ["none"])]
     return lines
 
 
-def notes(doc, previous, previous_tag, tag, verified):
-    wire = verified["tripwire"]
+def notes(doc, previous, previous_tag, tag):
     lines = [f"# Knowledge base {tag}", "", f"Schema {SCHEMA_VERSION}, built with stig-mcp {doc['built_with']}.", ""]
-    lines += ["## Upstream", *(f"- {k}: {v}" for k, v in sorted(doc["upstream"].items())), ""]
     lines += ["## Benchmarks", *_diff_lines(doc, previous, previous_tag), ""]
+    lines += ["## Upstream", *(f"- {k}: {v}" for k, v in sorted(doc["upstream"].items())), ""]
     lines += [
         "## Freshness tripwire",
         "Passed: every benchmark on DISA's index is held at its newest release within the same major.",
     ]
-    if wire["other_major"]:
-        lines.append(f"Newer major on the index, library major kept: {', '.join(wire['other_major'])}")
-    if wire["unmatched"]:
-        lines.append(
-            f"On DISA's index under a name no stored benchmark came from (usually an older name of a "
-            f"renamed product): {', '.join(wire['unmatched'])}"
-        )
     lines += ["", "## SHA-256", f"- xz: {doc['sha256']['xz']}", f"- sqlite: {doc['sha256']['sqlite']}", ""]
+    return "\n".join(lines)
+
+
+def tripwire_summary(wire):
+    """The tripwire's notes for the maintainer: index names it could not match to a stored
+    benchmark by name. Neither fails the build, and neither tells a user what changed."""
+    lines = ["## Freshness tripwire notes", ""]
+    for heading, names in (
+        ("Newer major on the index, library major kept", wire["other_major"]),
+        ("On the index under a name no stored benchmark came from (usually an older name)", wire["unmatched"]),
+    ):
+        lines += [f"### {heading} ({len(names)})", *([f"- `{name}`" for name in names] or ["- none"]), ""]
     return "\n".join(lines)
 
 
@@ -142,6 +146,7 @@ def build(  # noqa: PLR0913
     kb_path=None,
     sources_dir=None,
     version=None,
+    step_summary=None,
 ):
     kb_path = Path(kb_path or config.KB_PATH)
     version = version or importlib.metadata.version("stig-mcp")
@@ -152,7 +157,10 @@ def build(  # noqa: PLR0913
     doc = _read_json(out_dir / releases.RELEASE_JSON_NAME)
     previous = _read_json(previous_path)
     changed = event == "workflow_dispatch" or not unchanged(doc, previous)
-    (out_dir / kb_package.NOTES_NAME).write_text(notes(doc, previous, previous_tag, tag, verified), encoding="utf-8")
+    (out_dir / kb_package.NOTES_NAME).write_text(notes(doc, previous, previous_tag, tag), encoding="utf-8")
+    if step_summary is not None:
+        with open(step_summary, "a", encoding="utf-8") as out:
+            out.write(tripwire_summary(verified["tripwire"]))
     listed = "".join(f"{path}\n" for path in assets) if changed else ""
     (out_dir / kb_package.ASSETS_LIST_NAME).write_text(listed, encoding="utf-8")
     return {"changed": changed, "assets": assets if changed else []}
@@ -184,6 +192,7 @@ def _parser():
     build_cmd.add_argument("--previous-tag")
     build_cmd.add_argument("--event", default="schedule")
     build_cmd.add_argument("--github-output")
+    build_cmd.add_argument("--step-summary")
     return parser
 
 
@@ -216,7 +225,9 @@ def _run(args):
             },
         )
         return
-    result = build(args.tag, args.out, args.previous, args.event, previous_tag=args.previous_tag)
+    result = build(
+        args.tag, args.out, args.previous, args.event, previous_tag=args.previous_tag, step_summary=args.step_summary
+    )
     _write_outputs(args.github_output, {"changed": str(result["changed"]).lower()})
 
 
