@@ -131,7 +131,7 @@ def test_notes__a_previous_release__lists_added_changed_and_dropped_benchmarks()
         ],
     }
     text = kb_release.notes(doc, previous, "kb-2026-09-28", f"kb-{TODAY}")
-    assert "### Added (1)\n- New V1R1\n" in text
+    assert "Since kb-2026-09-28:\n\n### Added (1)\n- New V1R1\n\n### Changed" in text
     assert "### Changed (1)\n- Bumped V2R8 -> V2R9\n" in text
     assert "### Dropped (1)\n- Gone V1R4\n" in text
     assert "Kept" not in text
