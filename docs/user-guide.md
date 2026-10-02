@@ -82,8 +82,10 @@ no other way to produce verbatim. A fluent paragraph with no ids, rule numbers, 
 
 ## Example prompts
 
-Each prompt below names something the model cannot answer from memory, so it calls the tool
-shown after it.
+Each prompt below asks for something only a tool result supplies (benchmark ids, rule ids,
+DISA's text), and the tool it should call is shown after it. If the answer has none of those,
+name the tool in the prompt, as the `#list_stigs` example does; `#name` is GitHub Copilot's
+syntax, and in Claude Code saying "using the list_stigs tool" does the same.
 
 **Starting from a technique**
 
@@ -115,8 +117,8 @@ shown after it.
 
 - `Is a newer stig-mcp knowledge base published?` (`check_sources`)
 
-[Two worked examples](#two-worked-examples) walks through what the first kind of answer
-contains.
+[Two worked examples](#two-worked-examples), further down, walk through what a technique
+answer contains.
 
 ## Scoping the prompt for a well-matched answer
 
