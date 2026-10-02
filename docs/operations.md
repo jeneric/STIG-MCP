@@ -6,14 +6,45 @@ This document is written for a source checkout: it spells paths as a checkout ha
 prefixes every command with `uv run`. An installed copy keeps its data elsewhere, because
 `site-packages` is the wrong home for gigabyte-scale downloads. It runs the entry points
 without the `uv run` prefix, or, when run through `uvx`, as `uvx --from stig-mcp <command>`.
-See the README's "Where the data lives" for the locations and the two environment variables
-that override them.
+See [Where the data lives](install.md#where-the-data-lives) in install.md for the locations
+and the two environment variables that override them.
 
 Three sections below are checkout-only and say so again where they appear: building a
 release by hand, which runs the `tools/` package that is deliberately not shipped in the
 wheel, and editing `applicability.yaml` or `id_corrections.yaml`, both of which an installed
 copy keeps inside `site-packages`. The corpus conformance harness, a developer tool, is in
 [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Contents
+
+- [Install a prebuilt knowledge base](#install-a-prebuilt-knowledge-base)
+  - [Installing on a host that cannot reach GitHub](#installing-on-a-host-that-cannot-reach-github)
+- [Build the knowledge base](#build-the-knowledge-base)
+  - [1. Fetch the sources](#1-fetch-the-sources)
+  - [2. Ingest](#2-ingest)
+- [Placing the sources by hand](#placing-the-sources-by-hand)
+  - [The SRG-STIG Library Compilation](#the-srg-stig-library-compilation)
+- [Keeping current](#keeping-current)
+  - [`--check`: what has moved, downloading nothing](#--check-what-has-moved-downloading-nothing)
+  - [`--refresh`: take what changed, prune what it supersedes](#--refresh-take-what-changed-prune-what-it-supersedes)
+- [How knowledge-base releases are built](#how-knowledge-base-releases-are-built)
+  - [Building a release by hand (checkout only)](#building-a-release-by-hand-checkout-only)
+- [The lifecycle of sources/](#the-lifecycle-of-sources)
+- [Quarterly refresh](#quarterly-refresh)
+- [Why a benchmark disappeared](#why-a-benchmark-disappeared)
+- [Mapping overrides](#mapping-overrides)
+- [Product build applicability](#product-build-applicability)
+  - [What the ingest reports](#what-the-ingest-reports)
+  - [Warnings and what to do about them](#warnings-and-what-to-do-about-them)
+- [Resolver distinctiveness margin](#resolver-distinctiveness-margin)
+  - [What the ingest reports](#what-the-ingest-reports-1)
+  - [The warning and what to do about it](#the-warning-and-what-to-do-about-it)
+- [Same-key benchmark corrections](#same-key-benchmark-corrections)
+- [Why a rule id can be held by another benchmark](#why-a-rule-id-can-be-held-by-another-benchmark)
+  - [What a current library actually produces](#what-a-current-library-actually-produces)
+  - [Building from an archival library](#building-from-an-archival-library)
+  - [What a scoped query returns, and how to find the holder](#what-a-scoped-query-returns-and-how-to-find-the-holder)
+- [Where the server's log is](#where-the-servers-log-is)
 
 ## Install a prebuilt knowledge base
 
@@ -38,7 +69,7 @@ refusal at any step exits 1 with the reason on stderr, and nothing is replaced. 
 1 after a replacement says so: "The knowledge base was installed, but its release record ...
 could not be written". The new knowledge base is then in place, and `check_sources` treats
 it as a local build until the record exists. A usage error exits 2. The knowledge base lands
-where the README's [Where the data lives](../README.md#where-the-data-lives) says, as
+where [Where the data lives](install.md#where-the-data-lives) says, as
 `stig_kb.sqlite` in the data directory, with `stig_kb.release.json` beside it recording
 which release it is. That record is trusted only while the SHA-256 it holds still matches
 the installed file, so a knowledge base rebuilt or replaced afterwards reads as a local
@@ -583,8 +614,8 @@ explains the reason.
 ## Mapping overrides
 
 In a source checkout `overrides.yaml` lives at the repository root, next to
-`pyproject.toml`; the README's "Where the data lives" gives the installed location and the
-`STIG_MCP_OVERRIDES` variable that names the file directly.
+`pyproject.toml`; [Where the data lives](install.md#where-the-data-lives) gives the installed
+location and the `STIG_MCP_OVERRIDES` variable that names the file directly.
 
 It is optional: if it is missing, the ingest applies no overrides at all, the same as an
 empty file. The one exception is a file you named yourself. When `STIG_MCP_OVERRIDES` is
@@ -880,7 +911,7 @@ Its first lines name the knowledge base it serves from and, when that knowledge 
 usable yet, say why. Where stderr ends up is the client's decision:
 
 - **VS Code**: run **MCP: List Servers**, select the server, and choose **Show Output**, as
-  the README's [GitHub Copilot in VS Code](../README.md#github-copilot-in-vs-code) also says.
+  [install.md](install.md#starting-the-server-and-checking-the-tools) also says.
 - **Claude Code**: `/mcp` shows each server's status, and a server that fails to start shows
   as failed there. The server's stderr is written to Claude Code's debug log,
   `~/.claude/debug/<session-id>.txt`, when Claude Code is started with `claude --debug=mcp`,

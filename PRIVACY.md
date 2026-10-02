@@ -35,4 +35,5 @@ local knowledge base.
 ## What is stored locally
 
 - The knowledge base, the downloaded sources, the fetch manifest and the installed-release
-  record, in the data directory the [README](README.md) describes. Nothing leaves the machine.
+  record, in the data directory [docs/install.md](docs/install.md#where-the-data-lives)
+  describes. Nothing leaves the machine.

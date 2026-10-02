@@ -230,7 +230,7 @@ def test_cli_modules__run_with_dash_m__expose_their_entry_point(module):
     assert "usage" in result.stdout.lower(), f"{module} produced no help output: {result.stdout!r}"
 
 
-def test_readme__tool_count__matches_the_registered_tools(tmp_path):
+def test_install__tool_count__matches_the_registered_tools(tmp_path):
     import asyncio  # noqa: PLC0415
     import re  # noqa: PLC0415
 
@@ -238,7 +238,7 @@ def test_readme__tool_count__matches_the_registered_tools(tmp_path):
 
     registered = len(asyncio.run(build_server(tmp_path / "absent.sqlite").list_tools()))
     words = {"five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
-    match = re.search(r"confirm the (\w+) tools", (Path(__file__).parent.parent / "README.md").read_text())
+    match = re.search(r"confirm the (\w+) tools", (Path(__file__).parent.parent / "docs/install.md").read_text())
     assert match and words[match.group(1)] == registered
 
 
@@ -248,9 +248,9 @@ def test_docs__could_not_check_exit_code__matches_the_constant():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
     root = Path(__file__).parent.parent
-    readme = re.search(r"and (\d+) when a source could not\s+be reached", (root / "README.md").read_text())
+    install = re.search(r"and (\d+) when a source could not\s+be reached", (root / "docs/install.md").read_text())
     table = re.search(
         r"^\| (\d+) \| nothing is to download from the sources", (root / "docs/operations.md").read_text(), re.M
     )
     guide = re.search(r"exits (\d+) when nothing else is to take", (root / "docs/user-guide.md").read_text())
-    assert [int(m.group(1)) for m in (readme, table, guide) if m] == [fetch.EXIT_COULD_NOT_CHECK] * 3
+    assert [int(m.group(1)) for m in (install, table, guide) if m] == [fetch.EXIT_COULD_NOT_CHECK] * 3

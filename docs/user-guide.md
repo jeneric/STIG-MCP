@@ -2,6 +2,37 @@
 
 For a person talking to an LLM that has this server wired in as an MCP tool.
 
+## Contents
+
+- [Tools](#tools)
+  - [Revoked MITRE ATT&CK® ids](#revoked-mitre-attck-ids)
+- [Getting the LLM to use the server](#getting-the-llm-to-use-the-server)
+- [Example prompts](#example-prompts)
+- [Scoping the prompt for a well-matched answer](#scoping-the-prompt-for-a-well-matched-answer)
+- [Reading the answer](#reading-the-answer)
+  - [Why did it answer about a different technique than I named?](#why-did-it-answer-about-a-different-technique-than-i-named)
+  - [How does it match the actor I named?](#how-does-it-match-the-actor-i-named)
+  - [When a technique has no controls](#when-a-technique-has-no-controls)
+  - [Why did I get controls but no STIG steps?](#why-did-i-get-controls-but-no-stig-steps)
+  - [Why does a control say it has no rules in the resolved STIG?](#why-does-a-control-say-it-has-no-rules-in-the-resolved-stig)
+  - [Why does the answer say benchmarks were omitted?](#why-does-the-answer-say-benchmarks-were-omitted)
+  - [Why did naming one product return three STIGs?](#why-did-naming-one-product-return-three-stigs)
+  - [Why is a benchmark id I named reported as not in the knowledge base?](#why-is-a-benchmark-id-i-named-reported-as-not-in-the-knowledge-base)
+  - [Why am I seeing steps from two versions of the same STIG?](#why-am-i-seeing-steps-from-two-versions-of-the-same-stig)
+  - [Why does a rule say it is Not Applicable in its own text?](#why-does-a-rule-say-it-is-not-applicable-in-its-own-text)
+  - [Why doesn't the answer include the check and fix steps?](#why-doesnt-the-answer-include-the-check-and-fix-steps)
+  - [What do CAT I, II, and III mean, and why is the answer ordered that way?](#what-do-cat-i-ii-and-iii-mean-and-why-is-the-answer-ordered-that-way)
+- [Where an answer's facts came from](#where-an-answers-facts-came-from)
+  - [Which artifacts did this answer come from, and can I check it myself?](#which-artifacts-did-this-answer-come-from-and-can-i-check-it-myself)
+  - [Checking for a newer knowledge base](#checking-for-a-newer-knowledge-base)
+  - [Installing or updating the knowledge base](#installing-or-updating-the-knowledge-base)
+- [When a STIG is no longer current](#when-a-stig-is-no-longer-current)
+- [Getting more out of it](#getting-more-out-of-it)
+- [Limits](#limits)
+- [Two worked examples](#two-worked-examples)
+  - [A live technique: T1078 on RHEL 9](#a-live-technique-t1078-on-rhel-9)
+  - [A revoked id: T1086 on Windows 11](#a-revoked-id-t1086-on-windows-11)
+
 ## Tools
 
 - `mitigations_for_technique(technique_id, system_description?, stig_ids?, severity?)`
@@ -42,12 +73,52 @@ guess, name the tool directly:
     Using #list_stigs, which RHEL benchmarks are in the knowledge base?
 
 GitHub Copilot needs one more thing before any of this works: see the Agent-mode
-requirement in the GitHub Copilot section of [../README.md](../README.md).
+requirement in the README's [quick start](../README.md#vs-code-github-copilot).
 
 To tell whether a tool actually ran, look for the tool's output shape in the answer:
 benchmark ids, rule ids (`SV-...r..._rule`), CCI numbers, or CAT severities the model has
 no other way to produce verbatim. A fluent paragraph with no ids, rule numbers, or a
 `notes` explanation in it is a sign the model answered from memory, not from a result.
+
+## Example prompts
+
+Each prompt below asks for something only a tool result supplies (benchmark ids, rule ids,
+DISA's text), and the tool it should call is shown after it. If the answer has none of those,
+name the tool in the prompt, as the `#list_stigs` example does; `#name` is GitHub Copilot's
+syntax, and in Claude Code saying "using the list_stigs tool" does the same.
+
+**Starting from a technique**
+
+- `What DISA STIG steps mitigate T1078 on Windows 11?` (`mitigations_for_technique`)
+- `Show only CAT I findings for T1059.001 on RHEL 9.` (`mitigations_for_technique` with
+  `severity`)
+
+**Starting from an actor**
+
+- `Which ATT&CK techniques does APT29 use?` (`techniques_for_actor`)
+- `Which STIG steps mitigate the techniques Lazarus Group uses on Windows 11?`
+  (`techniques_for_actor` with `include_mitigations`)
+
+**Finding the right benchmark**
+
+- `Which STIG benchmarks apply to RHEL 9?` (`resolve_system`)
+- `Using #list_stigs, which Cisco benchmarks are in the knowledge base?` (`list_stigs`)
+
+**Finding a technique**
+
+- `Which ATT&CK techniques cover credential dumping?` (`search_techniques`)
+
+**Getting DISA's exact text**
+
+- `Quote DISA's check and fix text for V-253284 word for word, then explain it.`
+  (`finding_details`)
+
+**Keeping current**
+
+- `Is a newer stig-mcp knowledge base published?` (`check_sources`)
+
+[Two worked examples](#two-worked-examples), further down, walk through what a technique
+answer contains.
 
 ## Scoping the prompt for a well-matched answer
 
