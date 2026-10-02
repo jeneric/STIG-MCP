@@ -388,10 +388,41 @@ def test_readme__sections__lead_with_the_prerequisite_quick_start_and_prompts():
     assert headings[:4] == ["Prerequisite", "Quick start", "Example prompts", "Other MCP clients"]
 
 
-def test_readme__each_quick_start__links_the_install_guide():
+def test_readme__each_quick_start__links_its_section_of_the_install_guide():
     readme = README.read_text()
-    for heading in ("VS Code (GitHub Copilot)", "Claude Code"):
-        assert f"]({BLOB}docs/install.md)" in _section(readme, heading), heading
+    for heading, anchor in (("VS Code (GitHub Copilot)", "vs-code-github-copilot"), ("Claude Code", "claude-code")):
+        assert f"]({BLOB}docs/install.md#{anchor})" in _section(readme, heading), heading
+
+
+def _slug(heading):
+    """GitHub's anchor for a markdown heading: lowercase, punctuation dropped, spaces to hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def test_slug__a_heading_with_punctuation__matches_githubs_anchor():
+    assert _slug("VS Code (GitHub Copilot)") == "vs-code-github-copilot"
+    assert _slug("The server does not start: `uvx` not found") == "the-server-does-not-start-uvx-not-found"
+
+
+def _anchors(doc):
+    return {_slug(heading) for heading in re.findall(r"^#+ (.+)$", doc.read_text(), re.M)}
+
+
+def test_docs__anchored_links__name_a_heading_in_their_target():
+    links = []
+    for doc in [README, *(ROOT / "docs").glob("*.md"), ROOT / "PRIVACY.md"]:
+        for target, anchor in re.findall(r"\]\(([^)#\s]*)#([^)\s]+)\)", doc.read_text()):
+            path = (
+                (ROOT / target.removeprefix(BLOB))
+                if target.startswith(BLOB)
+                else (doc.parent / target if target else doc)
+            )
+            if target.startswith("http") and not target.startswith(BLOB):
+                continue
+            links.append((doc.name, target, anchor, path))
+    assert len(links) >= 10, "too few anchored links found, so the pattern probably broke"
+    broken = [f"{doc} -> {target}#{anchor}" for doc, target, anchor, path in links if anchor not in _anchors(path)]
+    assert broken == []
 
 
 def test_install__organization_allowlist__quotes_the_message_vs_code_shows():

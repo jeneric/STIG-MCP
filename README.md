@@ -26,7 +26,7 @@ so it sees the new `PATH`.
 3. Ask: `Install the stig-mcp knowledge base.` This is a one-time download of about 6 MB.
    Allow the tool when VS Code asks.
 
-If that doesn't work, see [docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md).
+If that doesn't work, see [VS Code in docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#vs-code-github-copilot).
 
 ### Claude Code
 
@@ -36,7 +36,7 @@ If that doesn't work, see [docs/install.md](https://github.com/jeneric/STIG-MCP/
 
 2. Ask: `Install the stig-mcp knowledge base.` This is a one-time download of about 6 MB.
 
-If that doesn't work, see [docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md).
+If that doesn't work, see [Claude Code in docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#claude-code).
 
 ## Example prompts
 
@@ -46,8 +46,8 @@ With the knowledge base installed, try:
 2. `Which ATT&CK techniques does APT29 use?`
 3. `Which STIG benchmarks apply to RHEL 9?`
 
-[docs/user-guide.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md) covers
-what else to ask and how to make sure the agent answers from the server.
+The user guide covers [what else to ask](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-more-out-of-it) and
+[how to make sure the agent answers from the server](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-the-llm-to-use-the-server).
 
 ## Other MCP clients
 
@@ -66,14 +66,18 @@ Use this only if you are not using VS Code or Claude Code. Any client that launc
 }
 ```
 
-The two environment variables let uv download stig-mcp behind a TLS-inspecting proxy and are
+The two environment variables let uv download stig-mcp
+[behind a TLS-inspecting proxy](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#behind-a-tls-inspecting-proxy) and are
 harmless elsewhere. Then ask the agent to install the stig-mcp knowledge base, as in the
 quick start.
 
-[docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md) has the
-details: manual VS Code and Claude Code setup, running from a source checkout, installing the
-knowledge base without an agent or without network access, where the data lives, and
-troubleshooting.
+[docs/install.md](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md) has the details:
+
+- manual [VS Code](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#vs-code-github-copilot) and [Claude Code](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#claude-code) setup
+- [running from a source checkout](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#running-from-a-source-checkout)
+- [installing the knowledge base](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#installing-the-knowledge-base) without an agent or without network access
+- [where the data lives](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#where-the-data-lives)
+- [troubleshooting](https://github.com/jeneric/STIG-MCP/blob/main/docs/install.md#troubleshooting)
 
 ## What this server fetches
 
