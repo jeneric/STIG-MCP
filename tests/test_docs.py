@@ -220,6 +220,12 @@ def test_privacy__both_sections__cover_every_host_the_package_contacts():
     assert both == _hosts(ROOT / "stig_mcp") | set(releases.ASSET_REDIRECT_HOSTS)
 
 
+def test_privacy__server_section__says_the_os_may_contact_certificate_authorities():
+    body = " ".join(_section(PRIVACY.read_text(), "The MCP server").split())
+    assert "Certificate verification" in body and "uses the operating system" in body
+    assert "certificate authorities' servers" in body
+
+
 def test_privacy__user_agent__matches_what_every_request_sends():
     from stig_mcp.ingest import catalog, upstream  # noqa: PLC0415
 
