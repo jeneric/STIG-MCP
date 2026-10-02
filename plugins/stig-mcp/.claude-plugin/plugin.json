@@ -1,7 +1,7 @@
 {
   "name": "stig-mcp",
   "displayName": "STIG-MCP",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server mapping MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps",
   "author": { "name": "Eric Miller" },
   "homepage": "https://github.com/jeneric/STIG-MCP",
