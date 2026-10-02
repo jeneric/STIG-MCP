@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from stig_mcp.kb import freshness, releases
 from stig_mcp.server import app as app_module
 from stig_mcp.server import tools
@@ -404,8 +406,44 @@ def test_slug__a_heading_with_punctuation__matches_githubs_anchor():
     assert _slug("The server does not start: `uvx` not found") == "the-server-does-not-start-uvx-not-found"
 
 
+def _headings(doc):
+    """(level, text, anchor) for each heading outside code fences, with GitHub's -1, -2 suffix
+    on a repeated anchor."""
+    found, seen, fenced = [], {}, False
+    for line in doc.read_text().splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        match = None if fenced else re.match(r"^(#+) (.+)$", line)
+        if match:
+            base = _slug(match.group(2))
+            anchor = f"{base}-{seen[base]}" if base in seen else base
+            seen[base] = seen.get(base, 0) + 1
+            found.append((len(match.group(1)), match.group(2), anchor))
+    return found
+
+
 def _anchors(doc):
-    return {_slug(heading) for heading in re.findall(r"^#+ (.+)$", doc.read_text(), re.M)}
+    return {anchor for _level, _text, anchor in _headings(doc)}
+
+
+def test_headings__a_repeated_heading__gets_githubs_numbered_anchor(tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("## A\n\n```\n# not a heading\n```\n\n### Same\n\n### Same\n")
+    assert [anchor for _level, _text, anchor in _headings(doc)] == ["a", "same", "same-1"]
+
+
+_CONTENTS = re.compile(r"^( *)- \[(.+)\]\(#([^)]+)\)$", re.M)
+
+
+@pytest.mark.parametrize("name", ["install.md", "user-guide.md", "operations.md"])
+def test_contents__each_long_doc__lists_every_section_in_order(name):
+    doc = ROOT / "docs" / name
+    listed = [
+        (len(indent) // 2 + 2, text, anchor)
+        for indent, text, anchor in _CONTENTS.findall(_section(doc.read_text(), "Contents"))
+    ]
+    expected = [heading for heading in _headings(doc) if heading[0] in (2, 3) and heading[1] != "Contents"]
+    assert listed == expected
 
 
 def test_docs__anchored_links__name_a_heading_in_their_target():

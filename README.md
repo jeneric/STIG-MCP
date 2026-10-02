@@ -50,7 +50,8 @@ With the knowledge base installed, try:
 2. `Which ATT&CK techniques does APT29 use?`
 3. `Which STIG benchmarks apply to RHEL 9?`
 
-The user guide covers [what else to ask](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-more-out-of-it) and
+[More example prompts](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#example-prompts) are in the user guide, with
+[how to get more out of it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-more-out-of-it) and
 [how to make sure the agent answers from the server](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-the-llm-to-use-the-server).
 
 ## Other MCP clients

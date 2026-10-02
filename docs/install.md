@@ -4,6 +4,24 @@ The README's quick start covers the usual path: install uv, click the VS Code ba
 the Claude Code plugin, then ask the agent to install the knowledge base. This document has
 the details behind it and the fixes for when it does not work.
 
+## Contents
+
+- [VS Code (GitHub Copilot)](#vs-code-github-copilot)
+  - [Configuring by hand](#configuring-by-hand)
+  - [Starting the server and checking the tools](#starting-the-server-and-checking-the-tools)
+- [Claude Code](#claude-code)
+- [Running from a source checkout](#running-from-a-source-checkout)
+- [How the server runs](#how-the-server-runs)
+- [Installing the knowledge base](#installing-the-knowledge-base)
+- [Where the data lives](#where-the-data-lives)
+- [Troubleshooting](#troubleshooting)
+  - [The server does not start: `uvx` not found](#the-server-does-not-start-uvx-not-found)
+  - [Every tool answers `not_ready`](#every-tool-answers-not_ready)
+  - [Behind a TLS-inspecting proxy](#behind-a-tls-inspecting-proxy)
+  - [Downloads time out behind a proxy](#downloads-time-out-behind-a-proxy)
+  - ["This Model Context Protocol server is not in the list of servers allowed by your organization"](#this-model-context-protocol-server-is-not-in-the-list-of-servers-allowed-by-your-organization)
+  - [The GitHub source archive stops downloading partway](#the-github-source-archive-stops-downloading-partway)
+
 ## VS Code (GitHub Copilot)
 
 ### Configuring by hand

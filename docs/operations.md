@@ -15,6 +15,37 @@ wheel, and editing `applicability.yaml` or `id_corrections.yaml`, both of which 
 copy keeps inside `site-packages`. The corpus conformance harness, a developer tool, is in
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+## Contents
+
+- [Install a prebuilt knowledge base](#install-a-prebuilt-knowledge-base)
+  - [Installing on a host that cannot reach GitHub](#installing-on-a-host-that-cannot-reach-github)
+- [Build the knowledge base](#build-the-knowledge-base)
+  - [1. Fetch the sources](#1-fetch-the-sources)
+  - [2. Ingest](#2-ingest)
+- [Placing the sources by hand](#placing-the-sources-by-hand)
+  - [The SRG-STIG Library Compilation](#the-srg-stig-library-compilation)
+- [Keeping current](#keeping-current)
+  - [`--check`: what has moved, downloading nothing](#--check-what-has-moved-downloading-nothing)
+  - [`--refresh`: take what changed, prune what it supersedes](#--refresh-take-what-changed-prune-what-it-supersedes)
+- [How knowledge-base releases are built](#how-knowledge-base-releases-are-built)
+  - [Building a release by hand (checkout only)](#building-a-release-by-hand-checkout-only)
+- [The lifecycle of sources/](#the-lifecycle-of-sources)
+- [Quarterly refresh](#quarterly-refresh)
+- [Why a benchmark disappeared](#why-a-benchmark-disappeared)
+- [Mapping overrides](#mapping-overrides)
+- [Product build applicability](#product-build-applicability)
+  - [What the ingest reports](#what-the-ingest-reports)
+  - [Warnings and what to do about them](#warnings-and-what-to-do-about-them)
+- [Resolver distinctiveness margin](#resolver-distinctiveness-margin)
+  - [What the ingest reports](#what-the-ingest-reports-1)
+  - [The warning and what to do about it](#the-warning-and-what-to-do-about-it)
+- [Same-key benchmark corrections](#same-key-benchmark-corrections)
+- [Why a rule id can be held by another benchmark](#why-a-rule-id-can-be-held-by-another-benchmark)
+  - [What a current library actually produces](#what-a-current-library-actually-produces)
+  - [Building from an archival library](#building-from-an-archival-library)
+  - [What a scoped query returns, and how to find the holder](#what-a-scoped-query-returns-and-how-to-find-the-holder)
+- [Where the server's log is](#where-the-servers-log-is)
+
 ## Install a prebuilt knowledge base
 
 Building the knowledge base yourself costs about a gigabyte of downloads and an ingest;
