@@ -789,7 +789,7 @@ def test_explain__tls_failure_inside_urlerror__names_the_os_store():
 def test_explain__unreachable__names_the_host_and_the_offline_route():
     exc = urllib.error.URLError(OSError("Name or service not known"))
     message = releases.explain(exc, releases.LISTING_URL)
-    assert "api.github.com" in message
+    assert "Could not reach api.github.com" in message
     assert "--file" in message
 
 
