@@ -42,7 +42,7 @@ guess, name the tool directly:
     Using #list_stigs, which RHEL benchmarks are in the knowledge base?
 
 GitHub Copilot needs one more thing before any of this works: see the Agent-mode
-requirement in the GitHub Copilot section of [../README.md](../README.md).
+requirement in the README's [quick start](../README.md#vs-code-github-copilot).
 
 To tell whether a tool actually ran, look for the tool's output shape in the answer:
 benchmark ids, rule ids (`SV-...r..._rule`), CCI numbers, or CAT severities the model has

@@ -6,7 +6,7 @@ This document is written for a source checkout: it spells paths as a checkout ha
 prefixes every command with `uv run`. An installed copy keeps its data elsewhere, because
 `site-packages` is the wrong home for gigabyte-scale downloads. It runs the entry points
 without the `uv run` prefix, or, when run through `uvx`, as `uvx --from stig-mcp <command>`.
-See the README's "Where the data lives" for the locations and the two environment variables
+See [install.md](install.md#where-the-data-lives), "Where the data lives", for the locations and the two environment variables
 that override them.
 
 Three sections below are checkout-only and say so again where they appear: building a
@@ -38,7 +38,7 @@ refusal at any step exits 1 with the reason on stderr, and nothing is replaced. 
 1 after a replacement says so: "The knowledge base was installed, but its release record ...
 could not be written". The new knowledge base is then in place, and `check_sources` treats
 it as a local build until the record exists. A usage error exits 2. The knowledge base lands
-where the README's [Where the data lives](../README.md#where-the-data-lives) says, as
+where [install.md](install.md#where-the-data-lives)'s "Where the data lives" says, as
 `stig_kb.sqlite` in the data directory, with `stig_kb.release.json` beside it recording
 which release it is. That record is trusted only while the SHA-256 it holds still matches
 the installed file, so a knowledge base rebuilt or replaced afterwards reads as a local
@@ -583,7 +583,7 @@ explains the reason.
 ## Mapping overrides
 
 In a source checkout `overrides.yaml` lives at the repository root, next to
-`pyproject.toml`; the README's "Where the data lives" gives the installed location and the
+`pyproject.toml`; [install.md](install.md#where-the-data-lives)'s "Where the data lives" gives the installed location and the
 `STIG_MCP_OVERRIDES` variable that names the file directly.
 
 It is optional: if it is missing, the ingest applies no overrides at all, the same as an
@@ -880,7 +880,7 @@ Its first lines name the knowledge base it serves from and, when that knowledge 
 usable yet, say why. Where stderr ends up is the client's decision:
 
 - **VS Code**: run **MCP: List Servers**, select the server, and choose **Show Output**, as
-  the README's [GitHub Copilot in VS Code](../README.md#github-copilot-in-vs-code) also says.
+  [install.md](install.md#starting-the-server-and-checking-the-tools) also says.
 - **Claude Code**: `/mcp` shows each server's status, and a server that fails to start shows
   as failed there. The server's stderr is written to Claude Code's debug log,
   `~/.claude/debug/<session-id>.txt`, when Claude Code is started with `claude --debug=mcp`,
