@@ -358,3 +358,11 @@ def test_readme__corporate_note__names_both_uv_settings():
     note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
     assert "UV_SYSTEM_CERTS" in note and "UV_NATIVE_TLS" in note
     assert "system-certs = true" in note
+    assert "native-tls = true" in note
+    assert "0.11" in note
+
+
+def test_readme__corporate_note__drops_the_pair_where_the_os_store_is_empty():
+    note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
+    assert "ca-certificates" in note
+    assert "every configuration above" not in note

@@ -163,12 +163,20 @@ directory, so give it an absolute path if the client's is not yours.)
 Corporate networks that inspect TLS re-sign traffic with their own CA, which IT installs in the
 operating system's certificate store. stig-mcp verifies its own downloads against that store.
 uvx, which fetches stig-mcp itself, trusts only its bundled roots unless told otherwise, so
-every configuration above sets two environment variables: `UV_SYSTEM_CERTS` for uv 0.11 and
-later, and `UV_NATIVE_TLS` for older uv, which ignores the newer name. On newer uv the second
-one prints a deprecation warning, which is harmless.
+the client configurations above (the VS Code badge and `mcp.json`, the Claude Code plugin, and
+`claude mcp add`) set two environment variables: `UV_SYSTEM_CERTS` for uv 0.11 and later, and
+`UV_NATIVE_TLS` for older uv, which ignores the newer name. On newer uv the second one prints a
+deprecation warning, which is harmless. The bare `uvx stig-mcp` commands and the checkout
+configurations set neither.
 
-If you run `uvx` by hand on such a network, set `UV_SYSTEM_CERTS=true` in its environment
-first, or add `system-certs = true` to your `uv.toml`.
+If you run `uvx` by hand on such a network, tell uv first. With uv 0.11 or later, set
+`UV_SYSTEM_CERTS=true` in its environment or add `system-certs = true` to your `uv.toml`.
+With older uv, set `UV_NATIVE_TLS=true` or add `native-tls = true` instead: older uv rejects
+a `uv.toml` holding `system-certs`, and then every uv command fails.
+
+On a host whose operating system certificate store is empty (for example a minimal Linux
+container without `ca-certificates`), drop the two variables, because uv then has no roots at
+all.
 
 ### Where the data lives
 
