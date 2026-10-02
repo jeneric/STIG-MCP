@@ -133,3 +133,40 @@ def test_main__tls_expected_to_fail_but_passes__exits_one(capsys):
     code, out = _run(capsys, "--expect-default", "any", "--expect-tls", "fail")
     assert code == 1
     assert "tls was expected to fail and did pass" in out
+
+
+def _strict_failure(request, timeout=None):
+    raise urllib.error.URLError(
+        ssl.SSLCertVerificationError(1, "certificate verify failed: Basic Constraints of CA cert not marked critical")
+    )
+
+
+def test_main__default_reason_matches_the_failure__exits_zero(capsys):
+    code, out = _run(
+        capsys,
+        "--expect-default",
+        "fail",
+        "--default-reason",
+        "not marked critical",
+        "--expect-tls",
+        "pass",
+        default=_strict_failure,
+    )
+    assert code == 0
+    assert "PROBLEM" not in out
+
+
+def test_main__default_reason_does_not_match_the_failure__exits_one_and_prints_both(capsys):
+    code, out = _run(
+        capsys,
+        "--expect-default",
+        "fail",
+        "--default-reason",
+        "not marked critical",
+        "--expect-tls",
+        "pass",
+        default=_certificate_failure,
+    )
+    assert code == 1
+    problem = next(line for line in out.splitlines() if line.startswith("PROBLEM"))
+    assert "not marked critical" in problem and "certificate verify failed" in problem

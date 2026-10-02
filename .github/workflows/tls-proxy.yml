@@ -41,7 +41,9 @@ jobs:
         shell: bash
     env:
       UV_PYTHON: ${{ matrix.python }}
-      STRICT_DEFAULT: ${{ (matrix.python == '3.13' || matrix.python == '3.14') && 'fail' || 'any' }}
+      # macOS's default context never reads the keychain, so its failure there says nothing about strict mode.
+      STRICT_DEFAULT: ${{ matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14') && 'fail' || 'any' }}
+      STRICT_REASON: ${{ matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14') && 'not marked critical' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -68,7 +70,8 @@ jobs:
       - name: "Case 4: CA that strict mode rejects, in the OS store"
         run: >-
           tools/tls_ci.sh with-proxy "$CAS/strict"
-          uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default "$STRICT_DEFAULT" --expect-tls pass
+          uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default "$STRICT_DEFAULT" ${STRICT_REASON:+--default-reason "$STRICT_REASON"}
+          --expect-tls pass
 
   install-kb:
     strategy:

@@ -33,11 +33,15 @@ def attempt(open_url, url):
     return "pass", ""
 
 
-def _problems(name, outcome, reason, expected):
+def _problems(name, outcome, reason, expected, required_reason=None):
     if expected == "any" or outcome == expected == "pass":
         return []
     if outcome == expected == "fail":
-        return [] if reason.startswith("certificate error") else [f"{name} failed, but {reason}"]
+        if not reason.startswith("certificate error"):
+            return [f"{name} failed, but {reason}"]
+        if required_reason and required_reason not in reason:
+            return [f"{name} failed, but not with {required_reason!r}: {reason}"]
+        return []
     return [f"{name} was expected to {expected} and did {outcome}"]
 
 
@@ -45,6 +49,9 @@ def main(argv=None, default_opener=None, tls_opener=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", required=True)
     parser.add_argument("--expect-default", choices=OUTCOMES, required=True)
+    parser.add_argument(
+        "--default-reason", metavar="SUBSTRING", help="an expected default failure must contain this text"
+    )
     parser.add_argument("--expect-tls", choices=OUTCOMES, required=True)
     parser.add_argument("--no-worse", action="store_true", help="fail if tls fails where default passes")
     args = parser.parse_args(argv)
@@ -53,10 +60,11 @@ def main(argv=None, default_opener=None, tls_opener=None):
         "tls": attempt(tls_opener or tls.opener(), args.url),
     }
     problems = []
-    for name, expected in (("default", args.expect_default), ("tls", args.expect_tls)):
+    checks = (("default", args.expect_default, args.default_reason), ("tls", args.expect_tls, None))
+    for name, expected, required_reason in checks:
         outcome, reason = results[name]
         print(f"{name}: {outcome}" + (f" ({reason})" if reason else ""))
-        problems += _problems(name, outcome, reason, expected)
+        problems += _problems(name, outcome, reason, expected, required_reason)
     if args.no_worse and results["default"][0] == "pass" and results["tls"][0] == "fail":
         problems.append("tls is worse than Python's default here: default passed and tls failed")
     for problem in problems:

@@ -101,3 +101,12 @@ def test_tls_proxy_workflow__uv_leg__runs_the_shipped_env_pair_on_a_normal_netwo
     assert len(unproxied) >= 2
     first_proxied = next(i for i, step in enumerate(steps) if "with-proxy" in step.get("run", ""))
     assert max(unproxied) < first_proxied
+
+
+def test_tls_proxy_workflow__strict_case__requires_the_strict_reason_only_off_macos_on_python_3_13_and_later():
+    probe = _doc()["jobs"]["probe"]
+    strict = "matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14')"
+    assert probe["env"]["STRICT_DEFAULT"] == "${{ " + strict + " && 'fail' || 'any' }}"
+    assert probe["env"]["STRICT_REASON"] == "${{ " + strict + " && 'not marked critical' || '' }}"
+    (case4,) = [step["run"] for step in probe["steps"] if step.get("name", "").startswith("Case 4")]
+    assert '--expect-default "$STRICT_DEFAULT" ${STRICT_REASON:+--default-reason "$STRICT_REASON"}' in case4
