@@ -1,3 +1,4 @@
+import datetime
 import re
 import ssl
 import urllib.request
@@ -66,6 +67,42 @@ def test_context__linux_with_ssl_cert_file__leaves_it_to_openssl(monkeypatch, tm
     monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
     tls.context()
     assert verify_location_calls == []
+
+
+def _der_certificate():
+    x509 = pytest.importorskip("cryptography.x509")
+    from cryptography.hazmat.primitives import hashes, serialization  # noqa: PLC0415
+    from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "stig-mcp DER test CA")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.DER)
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+@pytest.mark.parametrize("contents", [_der_certificate, bytes], ids=["der", "empty"])
+def test_context__os_verifies_and_ssl_cert_file_is_not_pem__ignores_the_file(
+    monkeypatch, tmp_path, caplog, platform, contents
+):
+    cafile = tmp_path / "proxy-ca.cer"
+    cafile.write_bytes(contents())
+    monkeypatch.setattr(tls.sys, "platform", platform)
+    monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
+    assert isinstance(tls.context(), truststore.SSLContext)
+    assert tls.opener()
+    assert "SSL_CERT_FILE" in caplog.text
 
 
 def test_opener__no_extra_handlers__has_exactly_one_https_handler_on_the_truststore_context():

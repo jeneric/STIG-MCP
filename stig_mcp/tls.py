@@ -11,6 +11,7 @@ as Python 3.13's default context does; on Windows and macOS the OS verifies, so 
 stay as truststore leaves them. SSL_CERT_FILE is honored on every platform; SSL_CERT_DIR only
 on Linux, because truststore on Windows and macOS sees only anchors loaded from a file."""
 
+import logging
 import os
 import ssl
 import sys
@@ -18,6 +19,8 @@ import urllib.request
 from pathlib import Path
 
 import truststore
+
+logger = logging.getLogger(__name__)
 
 
 def context():
@@ -33,7 +36,11 @@ def _trust_ssl_cert_file(context):
     # A missing file is ignored, as ssl.get_default_verify_paths() ignores it.
     cafile = os.environ.get("SSL_CERT_FILE")
     if cafile and Path(cafile).is_file():
-        context.load_verify_locations(cafile=cafile)
+        try:
+            context.load_verify_locations(cafile=cafile)
+        except ssl.SSLError as exc:
+            # Python's default context and uv also ignore a file holding no PEM certificate.
+            logger.warning("Ignoring SSL_CERT_FILE %s, which holds no PEM certificate: %s", cafile, exc)
 
 
 def opener(*handlers):
