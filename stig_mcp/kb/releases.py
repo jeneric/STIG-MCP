@@ -275,8 +275,9 @@ def explain(exc, url):
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
     if isinstance(reason, ssl.SSLError):
         return (
-            f"The TLS connection to {host} failed ({_quoted(reason)}); an inspecting proxy is likely. Set "
-            f"HTTPS_PROXY, or add your organization's CA certificate to Python's trust store. {OFFLINE}"
+            f"The TLS connection to {host} failed ({_quoted(reason)}); stig-mcp verifies with the "
+            f"operating system's certificate store, so an inspecting proxy's CA certificate must be "
+            f"installed there. {OFFLINE}"
         )
     if isinstance(reason, TimeoutError):
         return f"The connection to {host} timed out. {OFFLINE}"

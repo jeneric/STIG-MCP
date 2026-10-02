@@ -1461,11 +1461,11 @@ def test_install_knowledge_base__github_unreachable__caller_error_names_the_offl
         tools.install_knowledge_base(kb, opener=github)
 
 
-def test_install_knowledge_base__tls_intercepted__caller_error_names_the_proxy_advice(tmp_path):
+def test_install_knowledge_base__tls_intercepted__caller_error_names_the_os_store(tmp_path):
     github = FakeGitHub()
     github.bodies[releases.LISTING_URL] = urllib.error.URLError(ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"))
     kb = app_module.KnowledgeBase(tmp_path / "data" / "stig_kb.sqlite")
-    with pytest.raises(tools.CallerError, match=r"inspecting proxy.*HTTPS_PROXY"):
+    with pytest.raises(tools.CallerError, match=r"operating system's certificate store"):
         tools.install_knowledge_base(kb, opener=github)
 
 
