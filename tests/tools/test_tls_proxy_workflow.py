@@ -72,3 +72,20 @@ def test_tls_ci__make_cas__only_the_strict_ca_leaves_basic_constraints_non_criti
         assert ("critical" in text) is critical, name
         # mitmdump needs the key before the certificate in this file.
         assert "PRIVATE KEY" in (tmp_path / name / "mitmproxy-ca.pem").read_text().splitlines()[0]
+
+
+def test_tls_proxy_workflow__mitmproxy_install__uses_its_own_interpreter():
+    # mitmproxy needs Python 3.12 or newer, and uv tool install honors the job's UV_PYTHON.
+    installs = [
+        step["run"]
+        for job in _doc()["jobs"].values()
+        for step in job["steps"]
+        if "uv tool install" in step.get("run", "")
+    ]
+    assert installs, "no `uv tool install` step found, so nothing was checked"
+    assert [run for run in installs if "--python 3.14" not in run] == []
+
+
+def test_tls_proxy_workflow__every_job__has_a_timeout():
+    jobs = _doc()["jobs"]
+    assert [name for name, job in jobs.items() if "timeout-minutes" not in job] == []

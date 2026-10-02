@@ -59,7 +59,7 @@ with_proxy() {  # with_proxy CONFDIR CMD...
   "$bin/mitmdump" -q --listen-host 127.0.0.1 --listen-port "$PORT" --set confdir="$confdir" &
   # Global, not local: the EXIT trap runs after this function's locals are gone.
   PROXY_PID=$!
-  trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
+  trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true' EXIT
   local ready=no
   for _ in $(seq 150); do
     if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then ready=yes; break; fi
@@ -80,7 +80,7 @@ expect_fail() {  # expect_fail CMD...: succeed only when CMD fails on a certific
     exit 1
   fi
   echo "$output"
-  if ! grep -qiE "certificate|unknown ?issuer|UnknownIssuer|invalid peer certificate" <<<"$output"; then
+  if ! grep -qiE "invalid peer certificate|UnknownIssuer|unknown ?issuer|CERTIFICATE_VERIFY_FAILED" <<<"$output"; then
     echo "tls_ci.sh expect-fail: the command failed, but not on a certificate error" >&2
     exit 1
   fi
