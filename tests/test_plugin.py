@@ -28,9 +28,12 @@ def test_plugin__version__matches_pyproject():
     assert _manifest()["version"] == _version()
 
 
-def test_plugin__mcp_server__runs_the_pyproject_version_through_uvx():
+UV_SYSTEM_CERT_ENV = {"UV_SYSTEM_CERTS": "true", "UV_NATIVE_TLS": "true"}
+
+
+def test_plugin__mcp_server__runs_the_pyproject_version_through_uvx_with_system_certs():
     servers = json.loads((_plugin_dir() / ".mcp.json").read_text())["mcpServers"]
-    assert servers == {"stig-mcp": {"command": "uvx", "args": [f"stig-mcp=={_version()}"]}}
+    assert servers == {"stig-mcp": {"command": "uvx", "args": [f"stig-mcp=={_version()}"], "env": UV_SYSTEM_CERT_ENV}}
 
 
 def test_marketplace__entry__names_the_plugin_its_source_holds():

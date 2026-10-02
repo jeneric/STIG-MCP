@@ -334,5 +334,27 @@ def test_readme__vscode_badges__install_the_documented_configuration():
                 "type": "stdio",
                 "command": "uvx",
                 "args": ["stig-mcp"],
+                "env": {"UV_SYSTEM_CERTS": "true", "UV_NATIVE_TLS": "true"},
             }
         )
+
+
+PLUGIN_MCP = ROOT / "plugins" / "stig-mcp" / ".mcp.json"
+
+
+def test_readme__every_uvx_config__carries_the_plugin_env_pair():
+    plugin_env = json.loads(PLUGIN_MCP.read_text())["mcpServers"]["stig-mcp"]["env"]
+    readme = README.read_text()
+    copilot_section = _section(readme, "GitHub Copilot in VS Code")
+    documented = json.loads(re.search(r"```json\n(.*?)```", copilot_section, re.S).group(1))
+    assert documented["servers"]["stig-mcp"]["env"] == plugin_env
+    adds = re.findall(r"^\s*claude mcp add stig-mcp .*uvx stig-mcp$", readme, re.M)
+    assert adds, "the README has no `claude mcp add` line for uvx, so nothing was checked"
+    for line in adds:
+        assert all(f"-e {key}={value}" in line for key, value in plugin_env.items()), line
+
+
+def test_readme__corporate_note__names_both_uv_settings():
+    note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
+    assert "UV_SYSTEM_CERTS" in note and "UV_NATIVE_TLS" in note
+    assert "system-certs = true" in note

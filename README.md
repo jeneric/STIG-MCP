@@ -73,7 +73,7 @@ only this project's GitHub releases.
 
 ### GitHub Copilot in VS Code
 
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_stig--mcp-0098FF?logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=stig-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22stig-mcp%22%5D%7D)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_stig--mcp-0098FF?logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=stig-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22stig-mcp%22%5D%2C%22env%22%3A%7B%22UV_SYSTEM_CERTS%22%3A%22true%22%2C%22UV_NATIVE_TLS%22%3A%22true%22%7D%7D)
 
 Or run **MCP: Open User Configuration** from the Command Palette and add:
 
@@ -83,7 +83,8 @@ Or run **MCP: Open User Configuration** from the Command Palette and add:
     "stig-mcp": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["stig-mcp"]
+      "args": ["stig-mcp"],
+      "env": { "UV_SYSTEM_CERTS": "true", "UV_NATIVE_TLS": "true" }
     }
   }
 }
@@ -142,7 +143,7 @@ or from a shell, `claude plugin marketplace add jeneric/STIG-MCP` then
 `claude plugin install stig-mcp@stig-mcp`. The plugin pins the current release, and
 `claude plugin update stig-mcp@stig-mcp` moves it to the next one. Without the plugin:
 
-    claude mcp add stig-mcp -- uvx stig-mcp
+    claude mcp add stig-mcp -e UV_SYSTEM_CERTS=true -e UV_NATIVE_TLS=true -- uvx stig-mcp
 
 From a checkout, `uv run` locates the project from the working directory, so a client that
 starts elsewhere needs `--directory`, which makes the command independent of where it is
@@ -156,6 +157,18 @@ By default the knowledge base is not found relative to the working directory, so
 `uv run` cares where the client starts the server. Where it *is* found depends on whether this is a
 checkout or an installed copy. (A relative `STIG_MCP_DATA` does resolve against the working
 directory, so give it an absolute path if the client's is not yours.)
+
+### Behind a TLS-inspecting proxy
+
+Corporate networks that inspect TLS re-sign traffic with their own CA, which IT installs in the
+operating system's certificate store. stig-mcp verifies its own downloads against that store.
+uvx, which fetches stig-mcp itself, trusts only its bundled roots unless told otherwise, so
+every configuration above sets two environment variables: `UV_SYSTEM_CERTS` for uv 0.11 and
+later, and `UV_NATIVE_TLS` for older uv, which ignores the newer name. On newer uv the second
+one prints a deprecation warning, which is harmless.
+
+If you run `uvx` by hand on such a network, set `UV_SYSTEM_CERTS=true` in its environment
+first, or add `system-certs = true` to your `uv.toml`.
 
 ### Where the data lives
 
