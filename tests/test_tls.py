@@ -25,6 +25,17 @@ def test_context__default__is_a_truststore_context_that_verifies_peer_and_hostna
     assert context.check_hostname is True
 
 
+def test_context__linux__accepts_a_chain_anchored_on_an_intermediate(monkeypatch):
+    monkeypatch.setattr(tls.sys, "platform", "linux")
+    assert tls.context().verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_context__os_verifies__leaves_the_openssl_flags_untouched(monkeypatch, platform):
+    monkeypatch.setattr(tls.sys, "platform", platform)
+    assert tls.context().verify_flags == truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT).verify_flags
+
+
 def test_opener__no_extra_handlers__has_exactly_one_https_handler_on_the_truststore_context():
     (https,) = _https_handlers(tls.opener())
     assert isinstance(https._context, truststore.SSLContext)
