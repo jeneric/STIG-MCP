@@ -6,8 +6,8 @@ This document is written for a source checkout: it spells paths as a checkout ha
 prefixes every command with `uv run`. An installed copy keeps its data elsewhere, because
 `site-packages` is the wrong home for gigabyte-scale downloads. It runs the entry points
 without the `uv run` prefix, or, when run through `uvx`, as `uvx --from stig-mcp <command>`.
-See [install.md](install.md#where-the-data-lives), "Where the data lives", for the locations and the two environment variables
-that override them.
+See [Where the data lives](install.md#where-the-data-lives) in install.md for the locations
+and the two environment variables that override them.
 
 Three sections below are checkout-only and say so again where they appear: building a
 release by hand, which runs the `tools/` package that is deliberately not shipped in the
@@ -38,7 +38,7 @@ refusal at any step exits 1 with the reason on stderr, and nothing is replaced. 
 1 after a replacement says so: "The knowledge base was installed, but its release record ...
 could not be written". The new knowledge base is then in place, and `check_sources` treats
 it as a local build until the record exists. A usage error exits 2. The knowledge base lands
-where [install.md](install.md#where-the-data-lives)'s "Where the data lives" says, as
+where [Where the data lives](install.md#where-the-data-lives) says, as
 `stig_kb.sqlite` in the data directory, with `stig_kb.release.json` beside it recording
 which release it is. That record is trusted only while the SHA-256 it holds still matches
 the installed file, so a knowledge base rebuilt or replaced afterwards reads as a local
@@ -583,8 +583,8 @@ explains the reason.
 ## Mapping overrides
 
 In a source checkout `overrides.yaml` lives at the repository root, next to
-`pyproject.toml`; [install.md](install.md#where-the-data-lives)'s "Where the data lives" gives the installed location and the
-`STIG_MCP_OVERRIDES` variable that names the file directly.
+`pyproject.toml`; [Where the data lives](install.md#where-the-data-lives) gives the installed
+location and the `STIG_MCP_OVERRIDES` variable that names the file directly.
 
 It is optional: if it is missing, the ingest applies no overrides at all, the same as an
 empty file. The one exception is a file you named yourself. When `STIG_MCP_OVERRIDES` is

@@ -41,7 +41,7 @@ manual permissions it asks to read a file named like `…copilot-tool-output-…
 outside the workspace. That file is this server's answer; allow it.
 
 To see the server's log, run **MCP: List Servers**, select the server, and choose
-**Show Output**.
+**Show Output**. Not working? See [Troubleshooting](#troubleshooting).
 
 ## Claude Code
 
@@ -54,6 +54,8 @@ The plugin pins the current release, and `claude plugin update stig-mcp@stig-mcp
 the next one. Without the plugin:
 
     claude mcp add stig-mcp -e UV_SYSTEM_CERTS=true -e UV_NATIVE_TLS=true -- uvx stig-mcp
+
+Not working? See [Troubleshooting](#troubleshooting).
 
 ## Running from a source checkout
 
@@ -177,7 +179,8 @@ The client could not find `uvx` (or `uv`) on the `PATH` it inherited, which look
 broken server but is a missing command. In VS Code's output it shows as
 `Connection state: Error spawn uvx ENOENT`, and in `claude mcp list` as
 `Failed to connect — ENOENT: Executable not found in $PATH: "uvx"`. Restart the client after
-installing uv, or use the absolute path (`which uvx`, or `where uvx` on Windows) as `command`.
+installing uv, or use the absolute path as `command`: `which uvx` (or `which uv` for a checkout
+configuration), and `where` instead of `which` on Windows.
 
 ### Every tool answers `not_ready`
 
@@ -208,24 +211,35 @@ all.
 
 ### Downloads time out behind a proxy
 
-Some inspecting proxies hold a whole file to scan it before passing any of it on. uv waits 30
-seconds for data by default, so a large download can fail with `error decoding response body`
-or `operation timed out`. Raise the limit with `UV_HTTP_TIMEOUT`, in seconds: add
-`"UV_HTTP_TIMEOUT": "300"` to the `env` of the server's configuration, or set it in the
-terminal before running `uvx` by hand.
+Some inspecting proxies hold a whole file to scan it before passing any of it on, so a download
+can stall long enough to time out. Two downloads have separate limits:
+
+- **uv fetching stig-mcp and its dependencies** waits 30 seconds for data by default and fails
+  with `error decoding response body` or `operation timed out`. Raise the limit with
+  `UV_HTTP_TIMEOUT`, in seconds: add `"UV_HTTP_TIMEOUT": "300"` to the `env` of the server's
+  configuration, or set it in the terminal before running `uvx` by hand.
+- **stig-mcp downloading the knowledge base** also waits 30 seconds, and `UV_HTTP_TIMEOUT`
+  does not change that. If it times out, download the release files another way and install
+  from a file; see [operations.md](operations.md), "Install a prebuilt knowledge base".
 
 ### "This Model Context Protocol server is not in the list of servers allowed by your organization"
 
-This comes from your organization's GitHub Copilot policy, not from stig-mcp: Copilot Business
-and Enterprise organizations can restrict which MCP servers run, and the list does not include
+This comes from your GitHub Copilot Business or Enterprise policy, not from stig-mcp: the
+enterprise or organization restricts which MCP servers run, and its allowlist does not include
 this one. **Developer: Policy Diagnostics** in VS Code shows the policy and where it comes from;
-`chat.mcp.allowedServers` from "server" means the organization set it. Only an administrator
-can change it, by adding an entry for stig-mcp to the organization's
-`copilot/managed-settings.json`: `{"serverName": "stig-mcp"}` allows it by name, or an entry
-with the exact command and arguments allows only that invocation.
+`chat.mcp.allowedServers` from "server" means it came from your GitHub account's policy rather
+than from the machine.
+
+Only an administrator can change it, by adding an entry under `allowedMcpServers` in the
+enterprise's `copilot/managed-settings.json` (most enterprises keep it in a `.github-private`
+repository). A `serverCommand` entry must give the exact command and every argument, for example
+`{"serverCommand": ["uvx", "stig-mcp"]}` for the badge's configuration. A
+`{"serverName": "stig-mcp"}` entry is simpler but weaker, because anyone can give a server that
+name.
 
 ### The GitHub source archive stops downloading partway
 
 An inspecting proxy may cut off the repository's source zip (`.../archive/...zip`) or a clone,
 for example because the test suite holds deliberately hostile inputs for its security tests.
-Install from PyPI as above instead: the published package contains no tests.
+Install from PyPI (`uvx stig-mcp`, as the README's quick start does) instead: the published
+package contains no tests.
