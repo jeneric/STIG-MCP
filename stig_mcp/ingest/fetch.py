@@ -16,6 +16,7 @@ import zlib
 from http import HTTPStatus
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from stig_mcp import tls
 from stig_mcp.ingest import config, control_catalog, upstream
 
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -166,7 +167,7 @@ def take_public(dest_dir, names, opener=None):
     the error propagates; the caller still stops, so a half-finished fetch prunes nothing."""
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    open_url = opener or urllib.request.urlopen
+    open_url = opener or tls.opener()
     takers = {"attack": _take_attack, "ctid": _take_ctid, "catalog": _take_catalog}
     written = []
     for name in ("attack", "ctid", "catalog"):
@@ -604,7 +605,7 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
         # nothing: a fully cached selection must not be refused for lack of room it does not
         # need. Before the first request, so nothing is half-fetched when the volume is full.
         preflight(dest_dir, [entry for entry, _, _ in pending])
-    open_url = opener or urllib.request.urlopen
+    open_url = opener or tls.opener()
     try:
         for index, (entry, url, target) in enumerate(pending):
             if index:

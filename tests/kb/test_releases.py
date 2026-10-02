@@ -6,7 +6,9 @@ import urllib.error
 import urllib.request
 
 import pytest
+import truststore
 
+from stig_mcp import tls
 from stig_mcp.kb import releases
 from stig_mcp.kb.releases import ReleaseError
 from tests.kb.fake_github import FakeGitHub, http_error
@@ -475,3 +477,27 @@ def test_list_releases__http_error_response__closes_its_body():
     with pytest.raises(ReleaseError, match="HTTP 500"):
         releases.list_releases(github)
     assert error.closed
+
+
+class _Reached(Exception):
+    """Raised by the patched tls opener, so reaching it is observable."""
+
+
+def _refusing_opener(*_handlers):
+    def open_url(request, timeout=None):
+        raise _Reached(request.full_url)
+
+    return open_url
+
+
+def test_default_opener__holds_the_truststore_https_handler_and_the_allowlist_redirects():
+    handlers = releases.default_opener().__self__.handlers
+    (https,) = [h for h in handlers if isinstance(h, urllib.request.HTTPSHandler)]
+    assert isinstance(https._context, truststore.SSLContext)
+    assert any(isinstance(h, releases._AllowlistRedirects) for h in handlers)
+
+
+def test_list_releases__no_opener_given__opens_through_the_truststore_opener(monkeypatch):
+    monkeypatch.setattr(tls, "opener", _refusing_opener)
+    with pytest.raises(_Reached, match="api.github.com"):
+        releases.list_releases()

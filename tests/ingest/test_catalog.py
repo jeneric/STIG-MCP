@@ -1,7 +1,9 @@
+import re
 from pathlib import Path
 
 import pytest
 
+from stig_mcp import tls
 from stig_mcp.ingest import catalog
 
 FIX = Path(__file__).parent.parent / "fixtures"
@@ -291,3 +293,20 @@ def test_bytes_of__a_size_carrying_no_unit_suffix__is_read_as_plain_bytes():
     assert catalog._bytes_of("1024") == 1024
     assert catalog._bytes_of("1.5K") == 1536
     assert catalog._bytes_of("2M") == 2 * 1024**2
+
+
+class _Reached(Exception):
+    """Raised by the patched tls opener, so reaching it is observable."""
+
+
+def _refusing_opener(*_handlers):
+    def open_url(request, timeout=None):
+        raise _Reached(request.full_url)
+
+    return open_url
+
+
+def test_fetch_listing__no_opener_given__opens_through_the_truststore_opener(monkeypatch):
+    monkeypatch.setattr(tls, "opener", _refusing_opener)
+    with pytest.raises(_Reached, match=re.escape(catalog.INDEX_URL)):
+        catalog.fetch_listing()

@@ -16,6 +16,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from stig_mcp import tls
+
 REPOSITORY = "jeneric/STIG-MCP"
 LISTING_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
 TAG_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/tags/{{tag}}"
@@ -243,7 +245,7 @@ class _AllowlistRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def default_opener():
-    return urllib.request.build_opener(_AllowlistRedirects).open
+    return tls.opener(_AllowlistRedirects)
 
 
 def _reset_time(reset):

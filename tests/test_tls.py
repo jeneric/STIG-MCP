@@ -1,5 +1,7 @@
+import re
 import ssl
 import urllib.request
+from pathlib import Path
 
 import pytest
 import truststore
@@ -41,3 +43,32 @@ def test_opener__truststore_cannot_build_a_context__raises_instead_of_falling_ba
     monkeypatch.setattr(tls.truststore, "SSLContext", refuse)
     with pytest.raises(ssl.SSLError, match="no usable system store"):
         tls.opener()
+
+
+PACKAGE = Path(tls.__file__).resolve().parent
+
+
+# Code shapes only: fetch.py's docstring and tls.py's both name urlopen in prose, legitimately.
+_DEFAULT_URLOPEN = re.compile(
+    r"or urllib\.request\.urlopen\b|urllib\.request\.urlopen\(|=\s*urllib\.request\.urlopen\b"
+)
+
+
+def test_package__no_module__opens_urls_with_python_default_urlopen():
+    offenders = [
+        p.relative_to(PACKAGE).as_posix() for p in PACKAGE.rglob("*.py") if _DEFAULT_URLOPEN.search(p.read_text())
+    ]
+    assert offenders == []
+
+
+def test_default_urlopen_pattern__matches_the_shapes_it_guards_and_not_prose():
+    assert _DEFAULT_URLOPEN.search("    open_url = opener or urllib.request.urlopen\n")
+    assert _DEFAULT_URLOPEN.search("urllib.request.urlopen(request)")
+    assert _DEFAULT_URLOPEN.search("def f(opener=urllib.request.urlopen):")
+    assert not _DEFAULT_URLOPEN.search("patching urllib.request.urlopen or anything else global")
+    assert not _DEFAULT_URLOPEN.search("the shape of urllib.request.urlopen.")
+
+
+def test_package__modules_calling_the_truststore_opener__are_the_five_network_sites():
+    users = {p.relative_to(PACKAGE).as_posix() for p in PACKAGE.rglob("*.py") if "tls.opener(" in p.read_text()}
+    assert users == {"kb/releases.py", "ingest/fetch.py", "ingest/catalog.py", "ingest/upstream.py"}

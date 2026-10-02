@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from stig_mcp import applicability
+from stig_mcp import applicability, tls
 from stig_mcp.ingest import config
 from stig_mcp.ingest.orchestrator import IngestSources, build_kb
 from stig_mcp.kb import queries, releases
@@ -1655,3 +1655,20 @@ def test_techniques_for_actor__label_another_group_shares__reports_it_in_also_ma
 def test_techniques_for_actor__label_no_other_group_shares__carries_no_also_matches(kb_path):
     result = tools.techniques_for_actor(app_module.KnowledgeBase(kb_path), "APT29")
     assert "also_matches" not in result["actor"]
+
+
+def test_install_knowledge_base__no_opener_given__downloads_through_the_truststore_opener(
+    tmp_path, kb_path, monkeypatch
+):
+    def tls_failure(*_handlers):
+        def open_url(request, timeout=None):
+            raise urllib.error.URLError(ssl.SSLError(1, "truststore-opener-reached"))
+
+        return open_url
+
+    monkeypatch.setattr(tls, "opener", tls_failure)
+    target = tmp_path / "data" / "stig_kb.sqlite"
+    target.parent.mkdir(parents=True)
+    shutil.copyfile(kb_path, target)
+    with pytest.raises(tools.CallerError, match="truststore-opener-reached"):
+        tools.install_knowledge_base(app_module.KnowledgeBase(target))
