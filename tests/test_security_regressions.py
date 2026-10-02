@@ -800,7 +800,7 @@ def test_explain__tls_verification_fails__points_at_the_os_store_not_python():
     assert "operating system's certificate store" in message
     assert "Python's trust store" not in message
     assert "HTTPS_PROXY" not in message
-    assert "api.github.com" in message
+    assert "TLS connection to api.github.com failed" in message
     assert message.endswith(releases.OFFLINE)
 
 
