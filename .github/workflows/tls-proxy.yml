@@ -126,6 +126,16 @@ jobs:
           old_uv=$(uvx --from uv==0.10.12 python -c 'import uv; print(uv.find_uv_bin())')
           if command -v cygpath >/dev/null; then old_uv=$(cygpath -u "$old_uv"); fi
           echo "OLD_UV=$old_uv" >> "$GITHUB_ENV"
+      - name: Current uv with the env pair reaches PyPI with no proxy
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: uvx --refresh --from stig-mcp==0.1.1 python -c pass
+      - name: uv 0.10.12 with the env pair reaches PyPI with no proxy
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: '"$OLD_UV" tool run --refresh --from stig-mcp==0.1.1 python -c pass'
       - name: Trust the compliant CA in the OS store
         run: |
           tools/tls_ci.sh make-cas "$CAS"

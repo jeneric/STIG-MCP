@@ -89,3 +89,15 @@ def test_tls_proxy_workflow__mitmproxy_install__uses_its_own_interpreter():
 def test_tls_proxy_workflow__every_job__has_a_timeout():
     jobs = _doc()["jobs"]
     assert [name for name, job in jobs.items() if "timeout-minutes" not in job] == []
+
+
+def test_tls_proxy_workflow__uv_leg__runs_the_shipped_env_pair_on_a_normal_network_first():
+    steps = _doc()["jobs"]["uv-leg"]["steps"]
+    unproxied = [
+        i
+        for i, step in enumerate(steps)
+        if {"UV_SYSTEM_CERTS", "UV_NATIVE_TLS"} <= set(step.get("env", {})) and "with-proxy" not in step.get("run", "")
+    ]
+    assert len(unproxied) >= 2
+    first_proxied = next(i for i, step in enumerate(steps) if "with-proxy" in step.get("run", ""))
+    assert max(unproxied) < first_proxied
