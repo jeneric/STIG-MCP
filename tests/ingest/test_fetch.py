@@ -3,6 +3,7 @@ import hashlib
 import http.client
 import io
 import json
+import re
 import shutil
 import socket
 import ssl
@@ -16,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from stig_mcp import tls
 from stig_mcp.ingest import catalog, config, fetch, inventory, upstream
 from stig_mcp.ingest.fetch import _TARGET_FILENAMES, SOURCE_URLS, manual_sources
 
@@ -1968,3 +1970,26 @@ def test_run_refresh__public_download_fails__stops_before_disa_and_keeps_the_pre
     assert not any(u.startswith(catalog.INDEX_URL) for u in opener.requested)
     after_names = {p.name for p in tmp_path.iterdir()}
     assert before_names <= after_names
+
+
+class _Reached(Exception):
+    """Raised by the patched tls opener, so reaching it is observable."""
+
+
+def _refusing_opener(*_handlers):
+    def open_url(request, timeout=None):
+        raise _Reached(request.full_url)
+
+    return open_url
+
+
+def test_take_public__no_opener_given__opens_through_the_truststore_opener(tmp_path, monkeypatch):
+    monkeypatch.setattr(tls, "opener", _refusing_opener)
+    with pytest.raises(_Reached, match=re.escape(upstream.ATTACK_INDEX_URL)):
+        fetch.take_public(tmp_path, {"attack"})
+
+
+def test_fetch_disa__no_opener_given__downloads_through_the_truststore_opener(tmp_path, monkeypatch):
+    monkeypatch.setattr(tls, "opener", _refusing_opener)
+    with pytest.raises(_Reached, match=re.escape(_url("a.zip"))):
+        fetch.fetch_disa(tmp_path, entries=[_entry("a.zip")], sleep=lambda _seconds: None)

@@ -12,6 +12,10 @@ local knowledge base.
   project's releases only. They carry no request body and a fixed `User-Agent` of `stig-mcp`.
 - GitHub sees the requesting IP address and handles it under its own privacy statement:
   https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement
+- Certificate verification, for these requests and the fetch below, uses the operating system,
+  which may itself fetch certificate data (for example revocation status or missing
+  intermediates) from the certificate authorities' servers; stig-mcp's own requests are
+  unchanged.
 - One value an agent supplies does reach GitHub: the `release` argument of
   `install_knowledge_base` becomes part of the request URL to `api.github.com`, and it must
   have the form `kb-YYYY-MM-DD`.

@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from stig_mcp import tls
 from stig_mcp.ingest import upstream
 
 
@@ -152,3 +153,20 @@ def test_catalog_state__served_listing__sends_the_github_accept_header():
 
     assert upstream.catalog_state(opener) == sha
     assert seen["accept"] == upstream.GITHUB_ACCEPT
+
+
+class _Reached(Exception):
+    """Raised by the patched tls opener, so reaching it is observable."""
+
+
+def _refusing_opener(*_handlers):
+    def open_url(request, timeout=None):
+        raise _Reached(request.full_url)
+
+    return open_url
+
+
+def test_get_json__no_opener_given__opens_through_the_truststore_opener(monkeypatch):
+    monkeypatch.setattr(tls, "opener", _refusing_opener)
+    with pytest.raises(_Reached, match="attack-stix-data"):
+        upstream.get_json(upstream.ATTACK_INDEX_URL)

@@ -1,0 +1,203 @@
+name: TLS proxy
+
+# Proves stig-mcp and uvx work behind a TLS-inspecting proxy whose CA only the OS trusts.
+# Spec: corporate TLS inspection design, 2026-10-01.
+on:
+  pull_request:
+    paths:
+      - stig_mcp/tls.py
+      - stig_mcp/kb/releases.py
+      - stig_mcp/ingest/fetch.py
+      - stig_mcp/ingest/catalog.py
+      - stig_mcp/ingest/upstream.py
+      - pyproject.toml
+      - uv.lock
+      - plugins/**
+      - tools/tls_probe.py
+      - tools/tls_ci.sh
+      - .github/workflows/tls-proxy.yml
+  schedule:
+    - cron: "17 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROBE_URL: https://pypi.org/pypi/stig-mcp/json
+  MITMPROXY: mitmproxy==12.2.3
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+      # macOS's default context never reads the keychain, so its failure there says nothing about strict mode.
+      STRICT_DEFAULT: ${{ matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14') && 'fail' || 'any' }}
+      STRICT_REASON: ${{ matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14') && 'not marked critical' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Install the project and mitmproxy before any proxy is in the way
+        run: |
+          echo "CAS=$RUNNER_TEMP/cas" >> "$GITHUB_ENV"
+          uv sync --locked
+          uv tool install --python 3.14 "$MITMPROXY"
+      - name: Make three test CAs
+        run: tools/tls_ci.sh make-cas "$CAS"
+      # macOS 15 and later refuse headless trust changes (actions/runner-images#11893), so cases that need the OS to trust a CA skip there.
+      - name: Trust two of them in the OS store
+        if: runner.os != 'macOS'
+        run: |
+          tools/tls_ci.sh trust "$CAS/compliant/cert.pem"
+          tools/tls_ci.sh trust "$CAS/strict/cert.pem"
+      - name: "Case 1: no proxy"
+        run: uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default any --expect-tls pass --no-worse
+      - name: "Case 2: CA nobody trusts"
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/untrusted"
+          uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default fail --expect-tls fail
+      - name: "Case 3: compliant CA in the OS store"
+        if: runner.os != 'macOS'
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/compliant"
+          uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default any --expect-tls pass
+      - name: "Case 4: CA that strict mode rejects, in the OS store"
+        if: runner.os != 'macOS'
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/strict"
+          uv run --no-sync python tools/tls_probe.py --url "$PROBE_URL" --expect-default "$STRICT_DEFAULT" ${STRICT_REASON:+--default-reason "$STRICT_REASON"}
+          --expect-tls pass
+
+  install-kb:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_PYTHON: "3.14"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Install the project and mitmproxy before any proxy is in the way
+        run: |
+          echo "CAS=$RUNNER_TEMP/cas" >> "$GITHUB_ENV"
+          echo "STIG_MCP_DATA=$RUNNER_TEMP/data" >> "$GITHUB_ENV"
+          uv sync --locked
+          uv tool install --python 3.14 "$MITMPROXY"
+      - name: Make the test CAs
+        run: tools/tls_ci.sh make-cas "$CAS"
+      - name: Trust the strict-mode CA in the OS store
+        if: runner.os != 'macOS'
+        run: tools/tls_ci.sh trust "$CAS/strict/cert.pem"
+      - name: Without its CA trusted, the proxy breaks the install (control)
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/untrusted"
+          tools/tls_ci.sh expect-fail uv run --no-sync stig-mcp-install-kb
+      - name: Install the knowledge base through the proxy
+        if: runner.os != 'macOS'
+        run: tools/tls_ci.sh with-proxy "$CAS/strict" uv run --no-sync stig-mcp-install-kb
+      - name: Install the knowledge base with no proxy
+        if: runner.os == 'macOS'
+        run: uv run --no-sync stig-mcp-install-kb
+      - name: The knowledge base landed
+        run: test -s "$STIG_MCP_DATA/stig_kb.sqlite"
+
+  uv-leg:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_PYTHON: "3.14"
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Fetch Python, mitmproxy and uv 0.10.12 before any proxy is in the way
+        env:
+          UV_PYTHON_DOWNLOADS: automatic
+        run: |
+          echo "CAS=$RUNNER_TEMP/cas" >> "$GITHUB_ENV"
+          uv python install 3.14
+          uv tool install --python 3.14 "$MITMPROXY"
+          old_uv=$(uvx --from uv==0.10.12 python -c 'import uv; print(uv.find_uv_bin())')
+          if command -v cygpath >/dev/null; then old_uv=$(cygpath -u "$old_uv"); fi
+          echo "OLD_UV=$old_uv" >> "$GITHUB_ENV"
+      - name: Current uv with the env pair reaches PyPI with no proxy
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: uvx --refresh --from stig-mcp==0.1.1 python -c pass
+      - name: uv 0.10.12 with the env pair reaches PyPI with no proxy
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: '"$OLD_UV" tool run --refresh --from stig-mcp==0.1.1 python -c pass'
+      - name: Make the test CAs
+        run: tools/tls_ci.sh make-cas "$CAS"
+      - name: Trust the compliant CA in the OS store
+        if: runner.os != 'macOS'
+        run: tools/tls_ci.sh trust "$CAS/compliant/cert.pem"
+      - name: Current uv without the env pair is refused (control)
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/compliant"
+          tools/tls_ci.sh expect-fail uvx --refresh --from stig-mcp==0.1.1 python -c pass
+      - name: Current uv with the env pair reaches PyPI
+        if: runner.os != 'macOS'
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: tools/tls_ci.sh with-proxy "$CAS/compliant" uvx --refresh --from stig-mcp==0.1.1 python -c pass
+      - name: uv 0.10.12 without the env pair is refused (control)
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/compliant"
+          tools/tls_ci.sh expect-fail "$OLD_UV" tool run --refresh --from stig-mcp==0.1.1 python -c pass
+      - name: uv 0.10.12 with the env pair reaches PyPI
+        if: runner.os != 'macOS'
+        env:
+          UV_SYSTEM_CERTS: "true"
+          UV_NATIVE_TLS: "true"
+        run: tools/tls_ci.sh with-proxy "$CAS/compliant" "$OLD_UV" tool run --refresh --from stig-mcp==0.1.1 python -c pass
+
+  minimal-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["python:3.14-slim", "python:3.14-alpine", "debian:stable-slim"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Take uv's static binary, which runs on glibc and musl alike
+        run: |
+          id=$(docker create ghcr.io/astral-sh/uv:0.11.29)
+          docker cp "$id:/uv" ./uv-static
+          docker rm "$id"
+      - name: Probe with no proxy, tls no worse than default
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          -e UV_PROJECT_ENVIRONMENT=/tmp/venv -e UV_PYTHON=3.14 -e PROBE_URL "$IMAGE"
+          /src/uv-static run --locked --no-dev python tools/tls_probe.py --url "$PROBE_URL"
+          --expect-default any --expect-tls any --no-worse

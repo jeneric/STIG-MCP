@@ -16,6 +16,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from stig_mcp import tls
+
 REPOSITORY = "jeneric/STIG-MCP"
 LISTING_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
 TAG_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/tags/{{tag}}"
@@ -243,7 +245,7 @@ class _AllowlistRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def default_opener():
-    return urllib.request.build_opener(_AllowlistRedirects).open
+    return tls.opener(_AllowlistRedirects)
 
 
 def _reset_time(reset):
@@ -273,8 +275,9 @@ def explain(exc, url):
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
     if isinstance(reason, ssl.SSLError):
         return (
-            f"The TLS connection to {host} failed ({_quoted(reason)}); an inspecting proxy is likely. Set "
-            f"HTTPS_PROXY, or add your organization's CA certificate to Python's trust store. {OFFLINE}"
+            f"The TLS connection to {host} failed ({_quoted(reason)}); stig-mcp verifies with the "
+            f"operating system's certificate store (and SSL_CERT_FILE, when set), so an inspecting "
+            f"proxy's CA certificate must be installed there. {OFFLINE}"
         )
     if isinstance(reason, TimeoutError):
         return f"The connection to {host} timed out. {OFFLINE}"

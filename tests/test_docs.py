@@ -220,6 +220,12 @@ def test_privacy__both_sections__cover_every_host_the_package_contacts():
     assert both == _hosts(ROOT / "stig_mcp") | set(releases.ASSET_REDIRECT_HOSTS)
 
 
+def test_privacy__server_section__says_the_os_may_contact_certificate_authorities():
+    body = " ".join(_section(PRIVACY.read_text(), "The MCP server").split())
+    assert "Certificate verification" in body and "uses the operating system" in body
+    assert "certificate authorities' servers" in body
+
+
 def test_privacy__user_agent__matches_what_every_request_sends():
     from stig_mcp.ingest import catalog, upstream  # noqa: PLC0415
 
@@ -334,5 +340,41 @@ def test_readme__vscode_badges__install_the_documented_configuration():
                 "type": "stdio",
                 "command": "uvx",
                 "args": ["stig-mcp"],
+                "env": {"UV_SYSTEM_CERTS": "true", "UV_NATIVE_TLS": "true"},
             }
         )
+
+
+PLUGIN_MCP = ROOT / "plugins" / "stig-mcp" / ".mcp.json"
+
+
+def test_readme__every_uvx_config__carries_the_plugin_env_pair():
+    plugin_env = json.loads(PLUGIN_MCP.read_text())["mcpServers"]["stig-mcp"]["env"]
+    readme = README.read_text()
+    copilot_section = _section(readme, "GitHub Copilot in VS Code")
+    documented = json.loads(re.search(r"```json\n(.*?)```", copilot_section, re.S).group(1))
+    assert documented["servers"]["stig-mcp"]["env"] == plugin_env
+    adds = re.findall(r"^\s*claude mcp add stig-mcp .*uvx stig-mcp$", readme, re.M)
+    assert adds, "the README has no `claude mcp add` line for uvx, so nothing was checked"
+    for line in adds:
+        assert all(f"-e {key}={value}" in line for key, value in plugin_env.items()), line
+
+
+def test_readme__corporate_note__names_both_uv_settings():
+    note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
+    assert "UV_SYSTEM_CERTS" in note and "UV_NATIVE_TLS" in note
+    assert "system-certs = true" in note
+    assert "native-tls = true" in note
+    assert "0.11" in note
+
+
+def test_readme__corporate_note__names_the_ca_file_variables_and_where_they_apply():
+    note = " ".join(_section(README.read_text(), "Behind a TLS-inspecting proxy").split())
+    assert "`SSL_CERT_FILE`" in note
+    assert "`SSL_CERT_DIR` is honored only on Linux" in note
+
+
+def test_readme__corporate_note__drops_the_pair_where_the_os_store_is_empty():
+    note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
+    assert "ca-certificates" in note
+    assert "every configuration above" not in note

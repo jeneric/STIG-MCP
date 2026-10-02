@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from typing import NamedTuple
 
+from stig_mcp import tls
 from stig_mcp.ingest.fetch import require_bare_name, require_web_url
 
 INDEX_URL = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
@@ -254,6 +255,6 @@ def fetch_listing(url=INDEX_URL, opener=None, user_agent=USER_AGENT):
     """The index page as text. The only network call in this module."""
     require_web_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": user_agent})  # noqa: S310  scheme confined by require_web_url above
-    open_url = opener or urllib.request.urlopen
+    open_url = opener or tls.opener()
     with open_url(request, timeout=_TIMEOUT) as response:
         return response.read().decode("utf-8", errors="replace")

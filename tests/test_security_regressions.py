@@ -777,11 +777,13 @@ def test_explain__rate_limited__names_the_reset_time_and_the_offline_route():
     assert "--file" in message
 
 
-def test_explain__tls_failure_inside_urlerror__names_the_inspecting_proxy():
+def test_explain__tls_failure_inside_urlerror__names_the_os_store():
     exc = urllib.error.URLError(ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"))
     message = releases.explain(exc, releases.LISTING_URL)
+    assert "operating system's certificate store" in message
     assert "inspecting proxy" in message
-    assert "HTTPS_PROXY" in message
+    assert "SSL_CERT_FILE" in message
+    assert "HTTPS_PROXY" not in message
 
 
 def test_explain__unreachable__names_the_host_and_the_offline_route():
@@ -789,6 +791,17 @@ def test_explain__unreachable__names_the_host_and_the_offline_route():
     message = releases.explain(exc, releases.LISTING_URL)
     assert "api.github.com" in message
     assert "--file" in message
+
+
+def test_explain__tls_verification_fails__points_at_the_os_store_not_python():
+    # The old advice sent a corporate user to edit Python's store, which truststore never reads.
+    exc = urllib.error.URLError(ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"))
+    message = releases.explain(exc, releases.LISTING_URL)
+    assert "operating system's certificate store" in message
+    assert "Python's trust store" not in message
+    assert "HTTPS_PROXY" not in message
+    assert "TLS connection to api.github.com failed" in message
+    assert message.endswith(releases.OFFLINE)
 
 
 def _installed_state(data_dir):
@@ -1029,10 +1042,10 @@ def test_list_releases__tag_lookup_answers_a_draft_under_another_tag__reports_th
         releases.list_releases(github, tag="kb-2026-10-04")
 
 
-def test_list_releases__tls_failure__names_the_inspecting_proxy_and_the_offline_route():
+def test_list_releases__tls_failure__names_the_os_store_and_the_offline_route():
     github = FakeGitHub()
     github.bodies[releases.LISTING_URL] = urllib.error.URLError(ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"))
-    with pytest.raises(releases.ReleaseError, match=r"inspecting proxy.*HTTPS_PROXY.*--file PATH --sha256 HEX"):
+    with pytest.raises(releases.ReleaseError, match=r"operating system's certificate store.*--file PATH --sha256 HEX"):
         releases.list_releases(github)
 
 

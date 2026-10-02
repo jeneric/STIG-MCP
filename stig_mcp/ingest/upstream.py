@@ -13,6 +13,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from stig_mcp import tls
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "stig-mcp"
@@ -107,7 +109,7 @@ def get_json(url, opener=None, accept=None):
         headers["Accept"] = accept
     # S310: every caller passes one of this module's https constants.
     request = urllib.request.Request(url, headers=headers)  # noqa: S310
-    open_url = opener or urllib.request.urlopen
+    open_url = opener or tls.opener()
     with open_url(request, timeout=TIMEOUT) as response:
         body = response.read()
     try:
