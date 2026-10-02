@@ -782,6 +782,7 @@ def test_explain__tls_failure_inside_urlerror__names_the_os_store():
     message = releases.explain(exc, releases.LISTING_URL)
     assert "operating system's certificate store" in message
     assert "inspecting proxy" in message
+    assert "SSL_CERT_FILE" in message
     assert "HTTPS_PROXY" not in message
 
 

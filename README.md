@@ -161,7 +161,8 @@ directory, so give it an absolute path if the client's is not yours.)
 ### Behind a TLS-inspecting proxy
 
 Corporate networks that inspect TLS re-sign traffic with their own CA, which IT installs in the
-operating system's certificate store. stig-mcp verifies its own downloads against that store.
+operating system's certificate store. stig-mcp verifies its own downloads against that store,
+and also trusts a CA file named by `SSL_CERT_FILE`; `SSL_CERT_DIR` is honored only on Linux.
 uvx, which fetches stig-mcp itself, trusts only its bundled roots unless told otherwise, so
 the client configurations above (the VS Code badge and `mcp.json`, the Claude Code plugin, and
 `claude mcp add`) set two environment variables: `UV_SYSTEM_CERTS` for uv 0.11 and later, and

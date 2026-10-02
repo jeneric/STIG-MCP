@@ -368,6 +368,12 @@ def test_readme__corporate_note__names_both_uv_settings():
     assert "0.11" in note
 
 
+def test_readme__corporate_note__names_the_ca_file_variables_and_where_they_apply():
+    note = " ".join(_section(README.read_text(), "Behind a TLS-inspecting proxy").split())
+    assert "`SSL_CERT_FILE`" in note
+    assert "`SSL_CERT_DIR` is honored only on Linux" in note
+
+
 def test_readme__corporate_note__drops_the_pair_where_the_os_store_is_empty():
     note = _section(README.read_text(), "Behind a TLS-inspecting proxy")
     assert "ca-certificates" in note

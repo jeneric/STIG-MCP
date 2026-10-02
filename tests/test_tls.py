@@ -36,6 +36,38 @@ def test_context__os_verifies__leaves_the_openssl_flags_untouched(monkeypatch, p
     assert tls.context().verify_flags == truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT).verify_flags
 
 
+@pytest.fixture
+def verify_location_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(truststore.SSLContext, "load_verify_locations", lambda _self, **kwargs: calls.append(kwargs))
+    return calls
+
+
+def test_context__darwin_with_ssl_cert_file__trusts_that_file(monkeypatch, tmp_path, verify_location_calls):
+    cafile = tmp_path / "proxy-ca.pem"
+    cafile.write_text("not parsed: load_verify_locations is recorded")
+    monkeypatch.setattr(tls.sys, "platform", "darwin")
+    monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
+    tls.context()
+    assert verify_location_calls == [{"cafile": str(cafile)}]
+
+
+def test_context__win32_with_ssl_cert_file_missing__loads_nothing(monkeypatch, tmp_path, verify_location_calls):
+    monkeypatch.setattr(tls.sys, "platform", "win32")
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
+    tls.context()
+    assert verify_location_calls == []
+
+
+def test_context__linux_with_ssl_cert_file__leaves_it_to_openssl(monkeypatch, tmp_path, verify_location_calls):
+    cafile = tmp_path / "proxy-ca.pem"
+    cafile.write_text("not parsed")
+    monkeypatch.setattr(tls.sys, "platform", "linux")
+    monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
+    tls.context()
+    assert verify_location_calls == []
+
+
 def test_opener__no_extra_handlers__has_exactly_one_https_handler_on_the_truststore_context():
     (https,) = _https_handlers(tls.opener())
     assert isinstance(https._context, truststore.SSLContext)

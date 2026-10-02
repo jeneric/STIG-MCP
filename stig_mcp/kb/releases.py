@@ -276,8 +276,8 @@ def explain(exc, url):
     if isinstance(reason, ssl.SSLError):
         return (
             f"The TLS connection to {host} failed ({_quoted(reason)}); stig-mcp verifies with the "
-            f"operating system's certificate store, so an inspecting proxy's CA certificate must be "
-            f"installed there. {OFFLINE}"
+            f"operating system's certificate store (and SSL_CERT_FILE, when set), so an inspecting "
+            f"proxy's CA certificate must be installed there. {OFFLINE}"
         )
     if isinstance(reason, TimeoutError):
         return f"The connection to {host} timed out. {OFFLINE}"

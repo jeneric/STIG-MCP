@@ -8,20 +8,32 @@ such a proxy, so falling back would turn a clear error into the original silent 
 
 Where OpenSSL verifies (Linux), the context also accepts a chain anchored on an intermediate CA,
 as Python 3.13's default context does; on Windows and macOS the OS verifies, so OpenSSL's flags
-stay as truststore leaves them."""
+stay as truststore leaves them. SSL_CERT_FILE is honored on every platform; SSL_CERT_DIR only
+on Linux, because truststore on Windows and macOS sees only anchors loaded from a file."""
 
+import os
 import ssl
 import sys
 import urllib.request
+from pathlib import Path
 
 import truststore
 
 
 def context():
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    if sys.platform not in ("win32", "darwin"):
+    if sys.platform in ("win32", "darwin"):
+        _trust_ssl_cert_file(context)
+    else:
         context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
     return context
+
+
+def _trust_ssl_cert_file(context):
+    # A missing file is ignored, as ssl.get_default_verify_paths() ignores it.
+    cafile = os.environ.get("SSL_CERT_FILE")
+    if cafile and Path(cafile).is_file():
+        context.load_verify_locations(cafile=cafile)
 
 
 def opener(*handlers):
