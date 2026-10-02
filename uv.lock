@@ -1026,6 +1026,7 @@ dependencies = [
     { name = "defusedxml" },
     { name = "mcp" },
     { name = "pyyaml" },
+    { name = "truststore" },
 ]
 
 [package.dev-dependencies]
@@ -1042,6 +1043,7 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "mcp", specifier = ">=2.2,<3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "truststore", specifier = ">=0.10" },
 ]
 
 [package.metadata.requires-dev]

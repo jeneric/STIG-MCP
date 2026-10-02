@@ -14,6 +14,8 @@ dependencies = [
     # major (its VERSIONING.md), as 2.0 did by renaming FastMCP and threading sync tools.
     "mcp>=2.2,<3",
     "pyyaml>=6.0.3",
+    # Verifies HTTPS with the operating system's store, so a corporate inspection CA works.
+    "truststore>=0.10",
 ]
 
 [project.urls]
