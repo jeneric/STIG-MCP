@@ -122,6 +122,42 @@ def test_tls_proxy_workflow__install_kb__first_proves_the_install_goes_through_t
     assert not any('tls_ci.sh trust "$CAS/untrusted' in run for run in runs)
 
 
+_NOT_MACOS = "runner.os != 'macOS'"
+
+
+def _steps():
+    return [(name, step) for name, job in _doc()["jobs"].items() for step in job["steps"]]
+
+
+def test_tls_proxy_workflow__os_trust_steps__skip_macos():
+    trusting = [step for _, step in _steps() if "tls_ci.sh trust" in step.get("run", "")]
+    assert trusting, "no trust step found, so nothing was checked"
+    assert [step["name"] for step in trusting if step.get("if") != _NOT_MACOS] == []
+
+
+def test_tls_proxy_workflow__proxied_cases_needing_os_trust__skip_macos():
+    needs_trust = [
+        step
+        for _, step in _steps()
+        if re.search(r'with-proxy "\$CAS/(compliant|strict)"', step.get("run", "")) and "expect-fail" not in step["run"]
+    ]
+    assert len(needs_trust) >= 5, "expected cases 3 and 4, the proxied install and two uv legs"
+    assert [step["name"] for step in needs_trust if step.get("if") != _NOT_MACOS] == []
+
+
+def test_tls_proxy_workflow__install_kb__installs_with_no_proxy_on_macos_only():
+    steps = _doc()["jobs"]["install-kb"]["steps"]
+    (step,) = [s for s in steps if s.get("name") == "Install the knowledge base with no proxy"]
+    assert step["if"] == "runner.os == 'macOS'"
+    assert step["run"] == "uv run --no-sync stig-mcp-install-kb"
+
+
+def test_tls_proxy_workflow__make_cas_steps__run_on_every_os():
+    making = [step for _, step in _steps() if "tls_ci.sh make-cas" in step.get("run", "")]
+    assert len(making) == 3, "probe, install-kb and uv-leg each make the CAs"
+    assert [step["name"] for step in making if "if" in step] == []
+
+
 def _expect_fail(output, exit_code):
     # S603: argv is a resolved bash, this repository's script and literal test text.
     return subprocess.run(  # noqa: S603

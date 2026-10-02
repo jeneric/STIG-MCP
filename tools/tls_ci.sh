@@ -38,9 +38,8 @@ trust() {  # trust CERT
       sudo cp "$1" "/usr/local/share/ca-certificates/$(basename "$(dirname "$1")")-test-ca.crt"
       sudo update-ca-certificates ;;
     Darwin)
-      # Without this, adding trust settings waits for a password dialog no runner can answer.
-      sudo security authorizationdb write com.apple.trust-settings.admin allow
-      sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$1" ;;
+      echo "tls_ci.sh trust: macOS 15 and later refuse headless trust changes (actions/runner-images#11893); skip OS-trust steps on macOS" >&2
+      exit 2 ;;
     MINGW* | MSYS*)
       certutil -addstore -f Root "$(cygpath -w "$1")" ;;
     *)
