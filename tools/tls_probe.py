@@ -5,6 +5,7 @@ A "fail" counts only when the failure is a certificate error, so a control behin
 never started cannot pass by accident."""
 
 import argparse
+import http.client
 import ssl
 import sys
 import urllib.error
@@ -25,9 +26,9 @@ def attempt(open_url, url):
     try:
         with open_url(request, timeout=TIMEOUT) as response:
             response.read(1)
-    except (OSError, urllib.error.URLError) as exc:
+    except (OSError, http.client.HTTPException) as exc:
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-        kind = "certificate error" if isinstance(reason, ssl.SSLError) else "not a certificate error"
+        kind = "certificate error" if isinstance(reason, ssl.SSLCertVerificationError) else "not a certificate error"
         return "fail", f"{kind}: {reason!r}"
     return "pass", ""
 
