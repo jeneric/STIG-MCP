@@ -38,9 +38,9 @@ def _trust_ssl_cert_file(context):
     if cafile and Path(cafile).is_file():
         try:
             context.load_verify_locations(cafile=cafile)
-        except ssl.SSLError as exc:
-            # Python's default context and uv also ignore a file holding no PEM certificate.
-            logger.warning("Ignoring SSL_CERT_FILE %s, which holds no PEM certificate: %s", cafile, exc)
+        except (ssl.SSLError, OSError) as exc:
+            # Python's default context and uv also ignore a file they cannot read or parse.
+            logger.warning("Ignoring SSL_CERT_FILE %s: %s", cafile, exc)
 
 
 def opener(*handlers):

@@ -1,6 +1,8 @@
 import datetime
+import os
 import re
 import ssl
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -102,6 +104,25 @@ def test_context__os_verifies_and_ssl_cert_file_is_not_pem__ignores_the_file(
     monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
     assert isinstance(tls.context(), truststore.SSLContext)
     assert tls.opener()
+    assert "SSL_CERT_FILE" in caplog.text
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="chmod 000 blocks reads only for a non-root POSIX user"
+)
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_context__os_verifies_and_ssl_cert_file_is_unreadable__ignores_the_file(
+    monkeypatch, tmp_path, caplog, platform
+):
+    cafile = tmp_path / "proxy-ca.pem"
+    cafile.write_text("-----BEGIN CERTIFICATE-----\n")
+    monkeypatch.setattr(tls.sys, "platform", platform)
+    monkeypatch.setenv("SSL_CERT_FILE", str(cafile))
+    cafile.chmod(0)
+    try:
+        assert isinstance(tls.context(), truststore.SSLContext)
+    finally:
+        cafile.chmod(0o600)
     assert "SSL_CERT_FILE" in caplog.text
 
 
