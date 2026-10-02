@@ -1,0 +1,74 @@
+import re
+import shutil
+import subprocess
+import tomllib
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW = ROOT / ".github" / "workflows" / "tls-proxy.yml"
+SCRIPT = ROOT / "tools" / "tls_ci.sh"
+_SHA_PIN = re.compile(r"[\w.-]+/[\w.-]+(/[\w.-]+)?@[0-9a-f]{40}")
+
+
+def _doc():
+    return yaml.safe_load(WORKFLOW.read_text())
+
+
+def _triggers():
+    # PyYAML reads the bare key `on` as the boolean True.
+    return _doc()[True]
+
+
+def test_tls_proxy_workflow__pull_request_paths__cover_every_module_that_opens_tls():
+    users = {
+        p.relative_to(ROOT).as_posix() for p in (ROOT / "stig_mcp").rglob("*.py") if "tls.opener(" in p.read_text()
+    }
+    assert users, "no module calls tls.opener(, so nothing was checked"
+    assert users | {"stig_mcp/tls.py", "tools/tls_probe.py", "tools/tls_ci.sh", "uv.lock", "pyproject.toml"} <= set(
+        _triggers()["pull_request"]["paths"]
+    )
+
+
+def test_tls_proxy_workflow__triggers__are_pull_requests_a_weekly_schedule_and_dispatch():
+    triggers = _triggers()
+    assert set(triggers) == {"pull_request", "schedule", "workflow_dispatch"}
+    assert len(triggers["schedule"]) == 1
+
+
+def test_tls_proxy_workflow__every_action__is_pinned_to_a_commit_sha():
+    uses = re.findall(r"uses:\s*(\S+)", WORKFLOW.read_text())
+    assert uses, "no `uses:` found, so nothing was checked"
+    assert [u for u in uses if not _SHA_PIN.fullmatch(u)] == []
+
+
+def test_tls_proxy_workflow__permissions__are_read_only():
+    assert _doc()["permissions"] == {"contents": "read"}
+
+
+def test_tls_proxy_workflow__probe_matrix__three_systems_and_every_supported_python():
+    matrix = _doc()["jobs"]["probe"]["strategy"]["matrix"]
+    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest", "macos-latest"}
+    floor = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["requires-python"]
+    assert floor == ">=3.11"
+    assert matrix["python"] == ["3.11", "3.12", "3.13", "3.14"]
+
+
+@pytest.mark.skipif(not (shutil.which("bash") and shutil.which("openssl")), reason="needs bash and openssl")
+def test_tls_ci__make_cas__only_the_strict_ca_leaves_basic_constraints_non_critical(tmp_path):
+    # S603: argv is a resolved bash or openssl, this repository's script and a pytest tmp_path.
+    subprocess.run([shutil.which("bash"), str(SCRIPT), "make-cas", str(tmp_path)], check=True)  # noqa: S603
+    for name, critical in (("untrusted", True), ("compliant", True), ("strict", False)):
+        cert = tmp_path / name / "cert.pem"
+        text = subprocess.run(  # noqa: S603
+            [shutil.which("openssl"), "x509", "-in", str(cert), "-noout", "-ext", "basicConstraints"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "CA:TRUE" in text
+        assert ("critical" in text) is critical, name
+        # mitmdump needs the key before the certificate in this file.
+        assert "PRIVATE KEY" in (tmp_path / name / "mitmproxy-ca.pem").read_text().splitlines()[0]
