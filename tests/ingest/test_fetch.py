@@ -1985,7 +1985,7 @@ def _refusing_opener(*_handlers):
 
 def test_take_public__no_opener_given__opens_through_the_truststore_opener(tmp_path, monkeypatch):
     monkeypatch.setattr(tls, "opener", _refusing_opener)
-    with pytest.raises(_Reached):
+    with pytest.raises(_Reached, match=re.escape(upstream.ATTACK_INDEX_URL)):
         fetch.take_public(tmp_path, {"attack"})
 
 
