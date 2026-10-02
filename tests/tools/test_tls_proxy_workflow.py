@@ -110,3 +110,44 @@ def test_tls_proxy_workflow__strict_case__requires_the_strict_reason_only_off_ma
     assert probe["env"]["STRICT_REASON"] == "${{ " + strict + " && 'not marked critical' || '' }}"
     (case4,) = [step["run"] for step in probe["steps"] if step.get("name", "").startswith("Case 4")]
     assert '--expect-default "$STRICT_DEFAULT" ${STRICT_REASON:+--default-reason "$STRICT_REASON"}' in case4
+
+
+def test_tls_proxy_workflow__install_kb__first_proves_the_install_goes_through_the_proxy():
+    runs = [step.get("run", "") for step in _doc()["jobs"]["install-kb"]["steps"]]
+    control = (
+        'tools/tls_ci.sh with-proxy "$CAS/untrusted" tools/tls_ci.sh expect-fail uv run --no-sync stig-mcp-install-kb'
+    )
+    real = 'tools/tls_ci.sh with-proxy "$CAS/strict" uv run --no-sync stig-mcp-install-kb'
+    assert runs.index(control) < runs.index(real)
+    assert not any('tls_ci.sh trust "$CAS/untrusted' in run for run in runs)
+
+
+def _expect_fail(output, exit_code):
+    # S603: argv is a resolved bash, this repository's script and literal test text.
+    return subprocess.run(  # noqa: S603
+        [shutil.which("bash"), str(SCRIPT), "expect-fail", "bash", "-c", f'echo "{output}"; exit {exit_code}'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="needs bash")
+@pytest.mark.parametrize(
+    "output",
+    [
+        "stig-mcp-install-kb: The TLS connection to api.github.com failed (A certificate chain processed ...)",
+        "error: invalid peer certificate: UnknownIssuer",
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed",
+    ],
+    ids=["stig_mcp_explain", "rustls", "openssl"],
+)
+def test_tls_ci__expect_fail_on_a_certificate_failure__succeeds(output):
+    assert _expect_fail(output, 1).returncode == 0
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="needs bash")
+def test_tls_ci__expect_fail_on_another_failure__fails():
+    result = _expect_fail("Could not reach api.github.com: connection refused", 1)
+    assert result.returncode == 1
+    assert "not on a certificate error" in result.stderr

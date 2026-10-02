@@ -80,7 +80,7 @@ expect_fail() {  # expect_fail CMD...: succeed only when CMD fails on a certific
     exit 1
   fi
   echo "$output"
-  if ! grep -qiE "invalid peer certificate|UnknownIssuer|unknown ?issuer|CERTIFICATE_VERIFY_FAILED" <<<"$output"; then
+  if ! grep -qiE "invalid peer certificate|UnknownIssuer|unknown ?issuer|CERTIFICATE_VERIFY_FAILED|The TLS connection to [^ ]+ failed" <<<"$output"; then
     echo "tls_ci.sh expect-fail: the command failed, but not on a certificate error" >&2
     exit 1
   fi

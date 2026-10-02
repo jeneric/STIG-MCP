@@ -98,6 +98,10 @@ jobs:
         run: |
           tools/tls_ci.sh make-cas "$CAS"
           tools/tls_ci.sh trust "$CAS/strict/cert.pem"
+      - name: Without its CA trusted, the proxy breaks the install (control)
+        run: >-
+          tools/tls_ci.sh with-proxy "$CAS/untrusted"
+          tools/tls_ci.sh expect-fail uv run --no-sync stig-mcp-install-kb
       - name: Install the knowledge base through the proxy
         run: tools/tls_ci.sh with-proxy "$CAS/strict" uv run --no-sync stig-mcp-install-kb
       - name: The knowledge base landed
