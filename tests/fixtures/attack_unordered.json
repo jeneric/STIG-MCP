@@ -14,6 +14,11 @@
     {"type": "attack-pattern", "id": "attack-pattern--base-after-sub",
      "name": "Valid Accounts", "x_mitre_is_subtechnique": false,
      "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "persistence"}],
-     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078"}]}
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1078"}]},
+    {"type": "course-of-action", "id": "course-of-action--m0000", "name": "Minimal Mitigation", "description": "fixture", "external_references": [{"source_name": "mitre-attack", "external_id": "M0000"}]},
+    {"type": "relationship", "relationship_type": "mitigates", "source_ref": "course-of-action--m0000", "target_ref": "attack-pattern--base-after-sub", "description": "fixture"},
+    {"type": "x-mitre-analytic", "id": "x-mitre-analytic--an0000", "name": "Analytic 0000", "description": "fixture", "x_mitre_platforms": ["Windows"], "x_mitre_log_source_references": [{"name": "WinEventLog:Security", "channel": "EventCode=4624"}], "x_mitre_mutable_elements": [], "external_references": [{"source_name": "mitre-attack", "external_id": "AN0000"}]},
+    {"type": "x-mitre-detection-strategy", "id": "x-mitre-detection-strategy--det0000", "name": "Minimal Strategy", "x_mitre_analytic_refs": ["x-mitre-analytic--an0000"], "external_references": [{"source_name": "mitre-attack", "external_id": "DET0000"}]},
+    {"type": "relationship", "relationship_type": "detects", "source_ref": "x-mitre-detection-strategy--det0000", "target_ref": "attack-pattern--base-after-sub"}
   ]
 }

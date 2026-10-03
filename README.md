@@ -2,7 +2,8 @@
 
 Local MCP server that maps MITRE ATT&CK® techniques (and actors) to the NIST
 800-53r5 controls that mitigate them, with the DISA STIG fix and check steps for
-the systems under consideration, severity-ordered.
+the systems under consideration, severity-ordered, and ATT&CK's own mitigations and
+detections where ATT&CK publishes them.
 
 <!-- mcp-name: io.github.jeneric/stig-mcp -->
 
@@ -49,6 +50,7 @@ With the knowledge base installed, try:
 1. `What DISA STIG steps mitigate T1078 on Windows 11?`
 2. `Which ATT&CK techniques does APT29 use?`
 3. `Which STIG benchmarks apply to RHEL 9?`
+4. `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
 
 [More example prompts](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#example-prompts) are in the user guide, with
 [how to get more out of it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-more-out-of-it) and

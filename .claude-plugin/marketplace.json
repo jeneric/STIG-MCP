@@ -6,7 +6,7 @@
     {
       "name": "stig-mcp",
       "source": "./plugins/stig-mcp",
-      "description": "MCP server mapping MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps"
+      "description": "MCP server: MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps, mitigations and detections"
     }
   ]
 }

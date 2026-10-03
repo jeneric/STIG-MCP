@@ -240,11 +240,11 @@ def test_install_release__pinned_to_an_older_tag__rolls_back_to_it(tmp_path, kb_
 def test_install_release__a_higher_schema_release_also_exists__reports_it(tmp_path, kb_path):
     github = FakeGitHub()
     github.publish("kb-2026-10-04", kb_path.read_bytes())
-    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "7").read_bytes(), schema="7", built_with="0.3.0")
+    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "8").read_bytes(), schema="8", built_with="0.3.0")
     result = install.install_release(tmp_path / "data" / "stig_kb.sqlite", opener=github)
     assert result["installed"]["release"] == "kb-2026-10-04"
     assert result["newer_schema_available"] == {
-        "schema": "7",
+        "schema": "8",
         "release": "kb-2026-10-11",
         "upgrade_to": "stig-mcp 0.3.0 or later",
     }
@@ -252,7 +252,7 @@ def test_install_release__a_higher_schema_release_also_exists__reports_it(tmp_pa
 
 def test_install_release__only_a_higher_schema_release__refuses_naming_the_upgrade(tmp_path, kb_path):
     github = FakeGitHub()
-    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "7").read_bytes(), schema="7", built_with="0.3.0")
+    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "8").read_bytes(), schema="8", built_with="0.3.0")
     with pytest.raises(InstallError, match=r"stig-mcp 0\.3\.0 or later"):
         install.install_release(tmp_path / "data" / "stig_kb.sqlite", opener=github)
 
@@ -264,7 +264,7 @@ def test_install_release__no_release_at_all__says_to_build_locally(tmp_path):
 
 def test_install_release__pinned_tag_holds_another_schema__refuses_naming_it(tmp_path, kb_path):
     github = FakeGitHub()
-    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "7").read_bytes(), schema="7")
+    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "8").read_bytes(), schema="8")
     with pytest.raises(InstallError, match=r"kb-2026-10-11"):
         install.install_release(tmp_path / "data" / "stig_kb.sqlite", release="kb-2026-10-11", opener=github)
 
@@ -278,10 +278,10 @@ def test_install_release__pinned_tag_holds_an_older_schema__refuses_naming_it(tm
 
 def test_install_release__newer_schemas_release_json_is_unreachable__falls_back_to_naming_the_schema(tmp_path, kb_path):
     github = FakeGitHub()
-    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "7").read_bytes(), schema="7")
+    github.publish("kb-2026-10-11", _schema(tmp_path, kb_path, "8").read_bytes(), schema="8")
     [release] = releases.list_releases(github)
     del github.bodies[release.url(releases.RELEASE_JSON_NAME)]
-    with pytest.raises(InstallError, match="a stig-mcp release that reads schema 7"):
+    with pytest.raises(InstallError, match="a stig-mcp release that reads schema 8"):
         install.install_release(tmp_path / "data" / "stig_kb.sqlite", opener=github)
 
 

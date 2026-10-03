@@ -34,28 +34,28 @@ def _close_the_connections_kb_holder_opens(monkeypatch):
     monkeypatch.setattr(app_module, "open_db", open_db_for_test)
 
 
-def test_mitigations_for_technique__known_technique_and_system__returns_controls_with_rules(kb_path):
+def test_defenses_for_technique__known_technique_and_system__returns_controls_with_rules(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", "RHEL 9 web server")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", "RHEL 9 web server")
     assert result["technique"]["id"] == "T1078"
     assert result["resolved_systems"][0]["stig_id"] == "RHEL_9_STIG"
-    ac2_1 = next((c for c in result["controls"] if c["control_id"] == "AC-2(1)"), None)
+    ac2_1 = next((c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)"), None)
     assert ac2_1 is not None and ac2_1["rules"]
 
 
-def test_mitigations_for_technique__no_system_supplied__returns_controls_without_findings_and_note(kb_path):
+def test_defenses_for_technique__no_system_supplied__returns_controls_without_findings_and_note(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078")
-    assert result["controls"]
-    assert result["findings"] == {}
-    assert all(c["rules"] == [] for c in result["controls"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078")
+    assert result["protect"]["controls"]
+    assert result["protect"]["findings"] == {}
+    assert all(c["rules"] == [] for c in result["protect"]["controls"])
     assert any("system" in note.lower() for note in result["notes"])
 
 
-def test_mitigations_for_technique__explicit_stig_ids__bypasses_resolver(kb_path):
+def test_defenses_for_technique__explicit_benchmark_ids__bypasses_resolver(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(
-        kb_holder(conn), "T1078", system_description="ignored text", stig_ids=["RHEL_9_STIG"]
+    result = tools.defenses_for_technique(
+        kb_holder(conn), "T1078", system_description="ignored text", benchmark_ids=["RHEL_9_STIG"]
     )
     # Same shape as the resolver path, so a caller never branches on which produced it.
     assert result["resolved_systems"] == [
@@ -79,51 +79,50 @@ def test_mitigations_for_technique__explicit_stig_ids__bypasses_resolver(kb_path
             "build": None,
             "version_coverage": [],
             "tied_omitted": 0,
+            "catalog": "disa",
         }
     ]
-    assert any(c["rules"] for c in result["controls"])
+    assert any(c["rules"] for c in result["protect"]["controls"])
 
 
-def test_mitigations_for_technique__explicit_ids_match_the_resolver_shape(kb_path):
+def test_defenses_for_technique__explicit_ids_match_the_resolver_shape(kb_path):
     conn = open_db_for_test(kb_path)
-    explicit = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
-    resolved = tools.mitigations_for_technique(
-        kb_holder(conn), "T1078", system_description="Red Hat Enterprise Linux 9"
-    )
+    explicit = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    resolved = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="Red Hat Enterprise Linux 9")
     assert set(explicit["resolved_systems"][0]) == set(resolved["resolved_systems"][0])
 
 
-def test_mitigations_for_technique__unknown_stig_id__keeps_it_and_explains_the_empty_result(kb_path):
+def test_defenses_for_technique__unknown_stig_id__keeps_it_and_explains_the_empty_result(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["NOPE_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["NOPE_STIG"])
     entry = next(s for s in result["resolved_systems"] if s["stig_id"] == "NOPE_STIG")
     assert entry["title"] is None and entry["high_confidence"] is False
     assert any("NOPE_STIG" in note and "list_stigs" in note for note in result["notes"])
 
 
-def test_mitigations_for_technique__repeated_unknown_stig_id__keeps_it_once(kb_path):
+def test_defenses_for_technique__repeated_unknown_stig_id__keeps_it_once(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["NOPE_STIG", "NOPE_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["NOPE_STIG", "NOPE_STIG"])
     entries = [s for s in result["resolved_systems"] if s["stig_id"] == "NOPE_STIG"]
     assert len(entries) == 1
     notes = [note for note in result["notes"] if "NOPE_STIG" in note]
     assert len(notes) == 1
 
 
-def test_mitigations_for_technique__stig_ids_none_of_which_exist__explains_once_without_per_control_noise(kb_path):
+def test_defenses_for_technique__benchmark_ids_none_of_which_exist__explains_once_without_per_control_noise(kb_path):
     # When every named stig_id is unknown, scope is empty, so the caller already gets one
     # explicit note per unknown id (asserted below). A "Control X has no rules in the
     # resolved STIG(s)" note on top of that, once per control, would repeat the same fact
     # the unknown-id note already gave: deliberately absent, do not add it back.
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["NOPE_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["NOPE_STIG"])
     entry = next(s for s in result["resolved_systems"] if s["stig_id"] == "NOPE_STIG")
     assert entry["title"] is None and entry["high_confidence"] is False
     assert any("NOPE_STIG" in note and "list_stigs" in note for note in result["notes"])
     assert not any("no rules in the resolved" in note for note in result["notes"])
 
 
-def test_mitigations_for_technique__id_with_two_majors__lists_every_version(tmp_path):
+def test_defenses_for_technique__id_with_two_majors__lists_every_version(tmp_path):
     # A bare benchmark id scopes to all its versions, so the echo has to show both or
     # the caller cannot tell which release the findings came from.
     fixtures = Path(__file__).parent.parent / "fixtures"
@@ -139,7 +138,7 @@ def test_mitigations_for_technique__id_with_two_majors__lists_every_version(tmp_
         out,
     )
     conn = open_db_for_test(out)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
     assert sorted(s["version"] for s in result["resolved_systems"]) == ["1", "2"]
 
 
@@ -182,15 +181,15 @@ def _governed_kb(tmp_path, monkeypatch, extra_stig_paths=()):
     return open_db_for_test(out)
 
 
-def test_mitigations_for_technique__explicit_multi_major_id__is_flagged_and_single_major_is_not(tmp_path, monkeypatch):
+def test_defenses_for_technique__explicit_multi_major_id__is_flagged_and_single_major_is_not(tmp_path, monkeypatch):
     # The flag is driven by how many majors the KB holds for the id, not by whether an
     # applicability rule governs it: _explicit_scope never consults applicability rules.
     # RHEL_9_STIG is governed by the injected test rule here (via _governed_kb), and still
     # must be flagged for the same reason it would be if ungoverned, because it resolves to
     # two majors in this KB; MS_Windows_Server_2022_STIG, present at one major, must not be.
     conn = _governed_kb(tmp_path, monkeypatch, extra_stig_paths=[discovered(FIX / "win2022_xccdf.xml")])
-    result = tools.mitigations_for_technique(
-        kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG", "MS_Windows_Server_2022_STIG"]
+    result = tools.defenses_for_technique(
+        kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG", "MS_Windows_Server_2022_STIG"]
     )
     by_id = {}
     for row in result["resolved_systems"]:
@@ -199,20 +198,20 @@ def test_mitigations_for_technique__explicit_multi_major_id__is_flagged_and_sing
     assert by_id["MS_Windows_Server_2022_STIG"] == [None]
 
 
-def test_mitigations_for_technique__unknown_technique__raises_with_guidance(kb_path):
+def test_defenses_for_technique__unknown_technique__raises_with_guidance(kb_path):
     conn = open_db_for_test(kb_path)
     with pytest.raises(ValueError, match="search_techniques"):
-        tools.mitigations_for_technique(kb_holder(conn), "T9999")
+        tools.defenses_for_technique(kb_holder(conn), "T9999")
 
 
-def test_mitigations_for_technique__override_suppresses_ctid_pair__pair_absent(kb_path):
+def test_defenses_for_technique__override_suppresses_ctid_pair__pair_absent(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
-    control_ids = {c["control_id"] for c in result["controls"]}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    control_ids = {c["control_id"] for c in result["protect"]["controls"]}
     assert "AC-8" not in control_ids
 
 
-def test_mitigations_for_technique__mixed_severity_findings__ordered_cat_i_first(tmp_path):
+def test_defenses_for_technique__mixed_severity_findings__ordered_cat_i_first(tmp_path):
     # Against its own knowledge base, because kb_path cannot express the case: kb_path's only CAT-II
     # rule maps via CCI-000048 to AC-8, AC-8 is suppressed for T1078, so `cats` would be the
     # single-element ['I'] and any ordering assertion would hold trivially.
@@ -235,18 +234,18 @@ def test_mitigations_for_technique__mixed_severity_findings__ordered_cat_i_first
         out,
     )
     conn = open_db_for_test(out)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["MIXED_SEVERITY_STIG"])
-    ac2_1 = next(c for c in result["controls"] if c["control_id"] == "AC-2(1)")
-    cats = [result["findings"][rule]["severity"]["cat"] for rule in ac2_1["rules"]]
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])
+    ac2_1 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)")
+    cats = [result["protect"]["findings"][rule]["severity"]["cat"] for rule in ac2_1["rules"]]
     # Both halves matter: the equality pins the order, and the set pins that the fixture still
     # supplies three severities, so the order check cannot go quietly vacuous.
     assert set(cats) == {"I", "II", "III"}, "the fixture must supply every severity"
     assert cats == ["I", "II", "III"]
 
 
-def test_techniques_for_actor__actor_and_systems_with_include_mitigations__returns_findings(kb_path):
+def test_techniques_for_actor__actor_and_systems_with_include_defenses__returns_findings(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.techniques_for_actor(kb_holder(conn), "APT29", system_description="RHEL 9", include_mitigations=True)
+    result = tools.techniques_for_actor(kb_holder(conn), "APT29", system_description="RHEL 9", include_defenses=True)
     assert result["actor"]["id"] == "G0016"
     technique = next(t for t in result["techniques"] if t["technique_id"] == "T1078")
     assert technique["controls"]
@@ -257,9 +256,7 @@ def test_techniques_for_actor__build_predates_any_stig__the_answer_carries_the_e
     # A build that predates the first official STIG returns zero findings; without the note
     # the empty answer would have no explanation anywhere.
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.techniques_for_actor(
-        kb_holder(conn), "APT29", system_description="RHEL 9 U1", include_mitigations=True
-    )
+    result = tools.techniques_for_actor(kb_holder(conn), "APT29", system_description="RHEL 9 U1", include_defenses=True)
     assert result["findings"] == {}
     assert any("predates the first official STIG" in n for n in result["notes"])
 
@@ -360,69 +357,69 @@ def test_resolve_scope__a_confident_hit_ties_within_the_cap__notes_the_omitted_b
     assert any(note.startswith("2 further benchmarks scored exactly as well as") for note in notes)
 
 
-def test_mitigations_for_technique__revoked_technique_id__answers_for_the_replacement(kb_path):
+def test_defenses_for_technique__revoked_technique_id__answers_for_the_replacement(kb_path):
     # An analyst working from a report written against an older ATT&CK release has no
     # way to know the id was renumbered, so failing on it hides an answer the knowledge base holds.
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T8001")
+    result = tools.defenses_for_technique(kb_holder(conn), "T8001")
     assert result["technique"]["id"] == "T9000"
     assert result["technique"]["redirected_from"] == "T8001"
     assert any("T8001" in note and "T9000" in note for note in result["notes"])
 
 
-def test_mitigations_for_technique__live_technique_id__reports_no_redirect(kb_path):
+def test_defenses_for_technique__live_technique_id__reports_no_redirect(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078")
     assert result["technique"]["redirected_from"] is None
     assert not any("revoked" in note.lower() for note in result["notes"])
 
 
-def test_mitigations_for_technique__id_in_neither_table__still_raises_with_guidance(kb_path):
+def test_defenses_for_technique__id_in_neither_table__still_raises_with_guidance(kb_path):
     conn = open_db_for_test(kb_path)
     with pytest.raises(ValueError, match="search_techniques"):
-        tools.mitigations_for_technique(kb_holder(conn), "T9999")
+        tools.defenses_for_technique(kb_holder(conn), "T9999")
 
 
-def test_mitigations_for_technique__build_selects_a_major__returns_only_that_versions_findings(tmp_path, monkeypatch):
+def test_defenses_for_technique__build_selects_a_major__returns_only_that_versions_findings(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
-    versions = {f["stig_version"] for f in result["findings"].values()}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
+    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
     assert versions == {"2"}
     assert any("build update 3" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__no_build_supplied__still_returns_both_majors_with_a_note(tmp_path, monkeypatch):
+def test_defenses_for_technique__no_build_supplied__still_returns_both_majors_with_a_note(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9")
-    versions = {f["stig_version"] for f in result["findings"].values()}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9")
+    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
     assert any("Supply a build" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__build_predates_any_stig__returns_controls_and_no_findings(tmp_path, monkeypatch):
+def test_defenses_for_technique__build_predates_any_stig__returns_controls_and_no_findings(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U1")
-    assert result["controls"]
-    assert result["findings"] == {}
-    assert all(c["rules"] == [] for c in result["controls"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U1")
+    assert result["protect"]["controls"]
+    assert result["protect"]["findings"] == {}
+    assert all(c["rules"] == [] for c in result["protect"]["controls"])
     assert [s["applicable"] for s in result["resolved_systems"]] == [False, False]
     assert any("predates the first official STIG" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__ungoverned_benchmark_with_a_build__says_the_build_was_ignored(kb_path):
+def test_defenses_for_technique__ungoverned_benchmark_with_a_build__says_the_build_was_ignored(kb_path):
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
     assert any("did not affect scoping" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__explicit_stig_ids__are_unaffected_by_applicability(tmp_path, monkeypatch):
+def test_defenses_for_technique__explicit_benchmark_ids__are_unaffected_by_applicability(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
-    versions = {f["stig_version"] for f in result["findings"].values()}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
 
 
-def test_mitigations_for_technique__limit_would_split_a_benchmarks_majors__keeps_the_applicable_findings(
+def test_defenses_for_technique__limit_would_split_a_benchmarks_majors__keeps_the_applicable_findings(
     tmp_path, monkeypatch
 ):
     # Pinned at the tool layer, not just resolve()'s rows: a cut applicable benchmark means
@@ -432,24 +429,22 @@ def test_mitigations_for_technique__limit_would_split_a_benchmarks_majors__keeps
     # fixture). A row-based slice makes `rhel_versions` below {"1"} instead of {"2"}.
     conn = _governed_kb(tmp_path, monkeypatch, extra_stig_paths=[discovered(FIX / "win2022_xccdf.xml")])
     monkeypatch.setattr(tools, "resolve", lambda conn, description: real_resolve(conn, description, limit=2))
-    result = tools.mitigations_for_technique(
-        kb_holder(conn), "T1078", system_description="Windows Server 2022, RHEL 9 U3"
-    )
-    rhel_versions = {f["stig_version"] for f in result["findings"].values() if f["stig_id"] == "RHEL_9_STIG"}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="Windows Server 2022, RHEL 9 U3")
+    rhel_versions = {f["stig_version"] for f in result["protect"]["findings"].values() if f["stig_id"] == "RHEL_9_STIG"}
     assert rhel_versions == {"2"}
     assert any("build update 3" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__build_selects_a_major__no_redundant_superseded_note(tmp_path, monkeypatch):
+def test_defenses_for_technique__build_selects_a_major__no_redundant_superseded_note(tmp_path, monkeypatch):
     # The scoped sibling's own note already explains the choice; a second note about the
     # superseded major saying the same thing would be redundant noise on every vSphere-
     # shaped query. Keep the silence when a scoped sibling is present in the response.
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
     assert not any("is only held here" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__benchmark_holds_only_the_superseded_major__explains_the_empty_result(
+def test_defenses_for_technique__benchmark_holds_only_the_superseded_major__explains_the_empty_result(
     tmp_path, monkeypatch
 ):
     # Regression: a benchmark whose only surviving row is superseded must not go mute. This
@@ -471,44 +466,44 @@ def test_mitigations_for_technique__benchmark_holds_only_the_superseded_major__e
         out,
     )
     conn = open_db_for_test(out)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
-    assert result["controls"]
-    assert result["findings"] == {}
-    assert all(c["rules"] == [] for c in result["controls"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
+    assert result["protect"]["controls"]
+    assert result["protect"]["findings"] == {}
+    assert all(c["rules"] == [] for c in result["protect"]["controls"])
     assert [s["applicable"] for s in result["resolved_systems"]] == [False]
     assert any("V2" in n and "does not hold" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__explicit_id_spanning_two_majors__says_so_without_narrowing(tmp_path, monkeypatch):
+def test_defenses_for_technique__explicit_id_spanning_two_majors__says_so_without_narrowing(tmp_path, monkeypatch):
     # Scoping is deliberately unchanged on this path: naming a benchmark returns every
     # version of it. The note is what tells the caller that findings from two majors, which
     # can carry different fix text for the same group id, are mixed in the answer.
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
-    versions = {f["stig_version"] for f in result["findings"].values()}
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
-    assert any("exists at more than one major" in n and "drop stig_ids" in n for n in result["notes"])
+    assert any("exists at more than one major" in n and "drop benchmark_ids" in n for n in result["notes"])
     assert not any("Supply a build in the system description" in n for n in result["notes"])
     assert not any("system_description" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__stig_ids_and_description_together__says_the_description_was_ignored(
+def test_defenses_for_technique__benchmark_ids_and_description_together__says_the_description_was_ignored(
     tmp_path, monkeypatch
 ):
     # The multi-major-explicit note's example ("describe the system with its
     # build instead, for example 'ESXi 8.0 U3'") can read back the caller's own
     # system_description verbatim, which looks like advice to do something they already
     # did. This note makes explicit that the description was supplied but never consulted,
-    # because stig_ids bypasses the resolver entirely.
+    # because benchmark_ids bypasses the resolver entirely.
     conn = _governed_kb(tmp_path, monkeypatch)
-    result = tools.mitigations_for_technique(
-        kb_holder(conn), "T1078", system_description="RHEL 9 U3", stig_ids=["RHEL_9_STIG"]
+    result = tools.defenses_for_technique(
+        kb_holder(conn), "T1078", system_description="RHEL 9 U3", benchmark_ids=["RHEL_9_STIG"]
     )
     assert any("system_description" in n and "ignored" in n and "RHEL 9 U3" in n for n in result["notes"])
 
 
-def test_mitigations_for_technique__any_response__cites_the_sources_it_was_built_from(kb_conn):
-    result = tools.mitigations_for_technique(kb_holder(kb_conn), "T1078", stig_ids=["TEST_STIG"])
+def test_defenses_for_technique__any_response__cites_the_sources_it_was_built_from(kb_conn):
+    result = tools.defenses_for_technique(kb_holder(kb_conn), "T1078", benchmark_ids=["TEST_STIG"])
     assert "attack" in result["sources"]
     assert "ctid" in result["sources"]
 
@@ -518,42 +513,42 @@ def test_techniques_for_actor__any_response__cites_the_sources_it_was_built_from
     assert "attack" in result["sources"]
 
 
-def test_mitigations_for_technique__deprecated_benchmark__says_disa_marked_it(deprecated_kb):
-    result = tools.mitigations_for_technique(kb_holder(deprecated_kb), "T1078", stig_ids=["DEPRECATED_STIG"])
+def test_defenses_for_technique__deprecated_benchmark__says_disa_marked_it(deprecated_kb):
+    result = tools.defenses_for_technique(kb_holder(deprecated_kb), "T1078", benchmark_ids=["DEPRECATED_STIG"])
     note = " ".join(result["notes"])
     assert "deprecated" in note and "2026-05-19" in note
 
 
-def test_mitigations_for_technique__sunset_origin__says_it_came_from_a_sunset_compilation(sunset_kb):
-    result = tools.mitigations_for_technique(kb_holder(sunset_kb), "T1078", stig_ids=["SUNSET_STIG"])
+def test_defenses_for_technique__sunset_origin__says_it_came_from_a_sunset_compilation(sunset_kb):
+    result = tools.defenses_for_technique(kb_holder(sunset_kb), "T1078", benchmark_ids=["SUNSET_STIG"])
     note = " ".join(result["notes"])
     assert "sunset compilation" in note
     assert "U_SRG-STIG_Library_July_2026.zip" in note
 
 
-def test_mitigations_for_technique__local_artifact_newer_than_the_library__does_not_imply_retirement(local_kb):
+def test_defenses_for_technique__local_artifact_newer_than_the_library__does_not_imply_retirement(local_kb):
     # Google_Android_17 is newer than the July 2026 compilation, not retired. Saying only
     # "not in the library" would read as retirement, which is backwards for this case.
-    result = tools.mitigations_for_technique(kb_holder(local_kb), "T1078", stig_ids=["LOCAL_STIG"])
+    result = tools.defenses_for_technique(kb_holder(local_kb), "T1078", benchmark_ids=["LOCAL_STIG"])
     note = " ".join(result["notes"])
     assert "supplied as a local artifact" in note
     assert "may be newer" in note
 
 
-def test_mitigations_for_technique__no_library_compilation__declines_to_judge_currency(no_library_kb):
-    result = tools.mitigations_for_technique(kb_holder(no_library_kb), "T1078", stig_ids=["LOOSE_STIG"])
+def test_defenses_for_technique__no_library_compilation__declines_to_judge_currency(no_library_kb):
+    result = tools.defenses_for_technique(kb_holder(no_library_kb), "T1078", benchmark_ids=["LOOSE_STIG"])
     note = " ".join(result["notes"])
     assert "without a library compilation" in note
     assert "not in" not in note
 
 
-def test_mitigations_for_technique__library_present_but_empty__declines_and_names_it(broken_library_kb):
+def test_defenses_for_technique__library_present_but_empty__declines_and_names_it(broken_library_kb):
     # A truncated or SRG-only compilation classifies correctly (stig_library ingest_meta
     # row exists, so sources.stig_library still cites it) but contributes zero
     # library-origin benchmarks. The "was supplied as a local artifact and is not in <zip>"
     # wording would assert LOOSE_STIG's absence from a compilation that was never actually
     # read: a false claim, not the "cannot be determined" decline this case requires.
-    result = tools.mitigations_for_technique(kb_holder(broken_library_kb), "T1078", stig_ids=["LOOSE_STIG"])
+    result = tools.defenses_for_technique(kb_holder(broken_library_kb), "T1078", benchmark_ids=["LOOSE_STIG"])
     note = " ".join(result["notes"])
     assert "U_SRG-STIG_Library_July_2026.zip" in note
     assert "contributed no benchmarks" in note
@@ -562,13 +557,13 @@ def test_mitigations_for_technique__library_present_but_empty__declines_and_name
     assert "supplied as a local artifact" not in note
 
 
-def test_mitigations_for_technique__sources_block__no_value_is_an_absolute_path(kb_path):
+def test_defenses_for_technique__sources_block__no_value_is_an_absolute_path(kb_path):
     # kb_path is built from FIX, an absolute fixtures directory, so cci/attack/ctid
     # sources are absolute Paths going in. Storing str(path) for them in ingest_meta would
     # leak the operator's home directory and username into a response an LLM surfaces to a
     # user. Every value the caller sees here must be free of that leak.
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
     # Path(value).is_absolute() alone would miss a leaked Windows path (C:\...) when this
     # suite runs on POSIX, since PurePosixPath does not treat a drive letter as absolute;
     # the explicit drive-letter check closes that regardless of which platform runs the test.
@@ -579,13 +574,13 @@ def test_mitigations_for_technique__sources_block__no_value_is_an_absolute_path(
         assert not re.match(r"^[A-Za-z]:[\\/]", value), f"{key} looks like a Windows absolute path: {value}"
 
 
-def test_mitigations_for_technique__catalog_with_no_extracted_version__omits_control_catalog_key(kb_path):
+def test_defenses_for_technique__catalog_with_no_extracted_version__omits_control_catalog_key(kb_path):
     # The repo fixture oscal_catalog.json carries no metadata.version, so its recorded
     # source_version is empty even though the catalog row exists in ingest_meta. A citation
     # key whose value asserts nothing is worse than an absent key in a block meant for
     # verification.
     conn = open_db_for_test(kb_path)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", stig_ids=["RHEL_9_STIG"])
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
     assert "control_catalog" not in result["sources"]
 
 
@@ -707,7 +702,7 @@ def test_resolve_scope__nothing_matched_and_no_verdict__keeps_the_generic_note(w
     assert all(hit["version_coverage"] == [] for hit in resolved), "this query must produce no verdict"
     assert notes == [
         "No STIG confidently matched 'Fillerware Padding'. Call resolve_system "
-        "or list_stigs to see candidates, or pass stig_ids explicitly.",
+        "or list_stigs to see candidates, or pass benchmark_ids explicitly.",
         "14 further benchmarks scored exactly as well as the last one shown for "
         "'Fillerware Padding' and were omitted. Call resolve_system with a higher limit to see "
         "them, or name the product more precisely.",
@@ -785,7 +780,7 @@ def test_resolve_scope__a_version_glued_to_a_letter_in_the_title__names_the_vers
     assert notes == [
         "This knowledge base holds no STIG for 'Novaflow Database 12'. The closest benchmark is "
         "NOVAFLOW_DATABASE_19C_STIG, covering 19. It does not apply to that version; to use one "
-        "anyway, pass it in stig_ids."
+        "anyway, pass it in benchmark_ids."
     ]
 
 
@@ -798,7 +793,7 @@ def test_resolve_scope__a_title_run_no_version_token_confirms__keeps_the_generic
     _scope, _resolved, notes = tools._resolve_scope(conn, "Sentinel 4180X Relay 9", None)
     assert notes == [
         "No STIG confidently matched 'Sentinel 4180X Relay 9'. Call resolve_system "
-        "or list_stigs to see candidates, or pass stig_ids explicitly."
+        "or list_stigs to see candidates, or pass benchmark_ids explicitly."
     ]
 
 
@@ -812,9 +807,9 @@ def test_resolve_scope__version_agnostic_benchmark__explains_the_silence(wide_kb
     assert "is not evidence that it does not apply" in notes[0]
 
 
-def test_mitigations_for_technique__uncovered_version__carries_the_note(wide_kb):
+def test_defenses_for_technique__uncovered_version__carries_the_note(wide_kb):
     conn = open_db_for_test(wide_kb)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", "RHEL 8")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", "RHEL 8")
     assert any("holds no STIG for 'RHEL 8'" in note for note in result["notes"])
 
 
@@ -846,7 +841,7 @@ def test_resolve_scope__hits_carry_an_uncovered_verdict__replaces_the_generic_no
     assert "No STIG confidently matched" not in notes[0]
 
 
-def test_mitigations_for_technique__hits_carry_an_uncovered_verdict__carries_the_note(kb_path, monkeypatch):
+def test_defenses_for_technique__hits_carry_an_uncovered_verdict__carries_the_note(kb_path, monkeypatch):
     # Same crafted-hit technique as the _resolve_scope test above, one level up: this
     # confirms the note reaches the server layer's actual output, not just _resolve_scope's
     # return value.
@@ -867,7 +862,7 @@ def test_mitigations_for_technique__hits_carry_an_uncovered_verdict__carries_the
         },
     ]
     monkeypatch.setattr(tools, "resolve", lambda conn, description: hits)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", "Microsoft SQL Server 2019")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", "Microsoft SQL Server 2019")
     assert any("holds no STIG for 'Microsoft SQL Server 2019'" in note for note in result["notes"])
 
 
@@ -943,7 +938,7 @@ def test_resolve_scope__the_acronym_for_a_role_phrase_in_the_title__reports_vers
         "QUASAR_FABRIC_L2S_STIG is not version-specific: this knowledge base holds no "
         "per-release benchmark for this product. The version you named does not appear in "
         "it, which is why nothing was auto-scoped, and is not evidence that it does not "
-        "apply to 'Quasar Fabric L2S 11'. Pass stig_ids=['QUASAR_FABRIC_L2S_STIG'] to "
+        "apply to 'Quasar Fabric L2S 11'. Pass benchmark_ids=['QUASAR_FABRIC_L2S_STIG'] to "
         "scope to it."
     ]
 
@@ -979,7 +974,7 @@ def test_resolve_system__exactly_one_benchmark_tied_within_the_cap__uses_singula
     ]
 
 
-def test_mitigations_for_technique__tier_wider_than_the_limit__notes_the_omitted_candidates(
+def test_defenses_for_technique__tier_wider_than_the_limit__notes_the_omitted_candidates(
     component_family_kb, monkeypatch
 ):
     # The mitigations path caps at 5 with no caller parameter, so force a narrower limit to
@@ -988,7 +983,7 @@ def test_mitigations_for_technique__tier_wider_than_the_limit__notes_the_omitted
     # confident benchmark from the scope itself.
     monkeypatch.setattr(tools, "resolve", lambda conn, description: real_resolve(conn, description, limit=2))
     conn = open_db_for_test(component_family_kb)
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", system_description="Vectrix Orchestrator")
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="Vectrix Orchestrator")
     assert any(note.startswith("2 further benchmarks scored exactly as well as") for note in result["notes"])
 
 
@@ -1013,38 +1008,38 @@ def test_resolve_scope__a_single_fragment_scoped_confidently__gains_no_version_n
     assert not any("holds no STIG" in note for note in notes)
 
 
-def test_mitigations_for_technique__more_stig_ids_than_the_cap__raises_naming_what_to_change(kb_path):
-    # The cap exists because nothing bounded this list: `stig_ids` is `list[str]` at the MCP
+def test_defenses_for_technique__more_benchmark_ids_than_the_cap__raises_naming_what_to_change(kb_path):
+    # The cap exists because nothing bounded this list: `benchmark_ids` is `list[str]` at the MCP
     # boundary, and every id becomes a bound SQL parameter in stigs_by_ids and, doubled, in
     # findings_for_control's scope. A caller naming more benchmarks than a real system has is
     # making a mistake the tool should name, not one it should answer slowly.
     conn = open_db_for_test(kb_path)
-    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS + 1)]
+    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS + 1)]
     with pytest.raises(ValueError) as excinfo:
-        tools.mitigations_for_technique(kb_holder(conn), "T1078", None, too_many)
+        tools.defenses_for_technique(kb_holder(conn), "T1078", None, too_many)
     message = str(excinfo.value)
-    assert "stig_ids" in message
-    assert str(tools._MAX_STIG_IDS) in message
+    assert "benchmark_ids" in message
+    assert str(tools._MAX_BENCHMARK_IDS) in message
     assert str(len(too_many)) in message
     assert "system_description" in message
 
 
-def test_techniques_for_actor__more_stig_ids_than_the_cap__raises_the_same_way(kb_path):
+def test_techniques_for_actor__more_benchmark_ids_than_the_cap__raises_the_same_way(kb_path):
     # The second entry point, tested separately rather than trusted to share the choke point.
     # A rule wired into only one of two caller paths leaves the other path returning results
     # with no explanation.
     conn = open_db_for_test(kb_path)
-    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS + 1)]
-    with pytest.raises(ValueError, match="stig_ids"):
+    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS + 1)]
+    with pytest.raises(ValueError, match="benchmark_ids"):
         tools.techniques_for_actor(kb_holder(conn), "G0016", None, too_many)
 
 
-def test_mitigations_for_technique__exactly_the_cap__is_answered(kb_path):
+def test_defenses_for_technique__exactly_the_cap__is_answered(kb_path):
     # The boundary is inclusive, and this is the assertion that fails if the comparison is
     # written `>=`. One real id so the call resolves something rather than only surviving.
     conn = open_db_for_test(kb_path)
-    ids = ["RHEL_9_STIG", *[f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS - 1)]]
-    result = tools.mitigations_for_technique(kb_holder(conn), "T1078", None, ids)
+    ids = ["RHEL_9_STIG", *[f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS - 1)]]
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", None, ids)
     assert any(system["stig_id"] == "RHEL_9_STIG" for system in result["resolved_systems"])
 
 
@@ -1061,7 +1056,7 @@ def _at_limit(kb_path, limit):
 
 def test_the_cap__both_queries_it_sizes__stay_under_the_sqlite_variable_floor(kb_path):
     """The cap's VALUE is load bearing, and no other test can pin it: they all size their input
-    from _MAX_STIG_IDS, so moving the constant moves their input with it.
+    from _MAX_BENCHMARK_IDS, so moving the constant moves their input with it.
 
     Executed rather than restated: a pure-Python arithmetic check sees the constant and not the
     query, which is the half that changes (binding each pair twice would pass it while a real
@@ -1076,8 +1071,8 @@ def test_the_cap__both_queries_it_sizes__stay_under_the_sqlite_variable_floor(kb
     cap (the direction the comment beside the constant implies a third major would force) cannot
     make this fail spuriously.
     """
-    scope = [(f"FILLER_{i}_STIG", "1") for i in range(2 * tools._MAX_STIG_IDS)]
-    ids = [f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS)]
+    scope = [(f"FILLER_{i}_STIG", "1") for i in range(2 * tools._MAX_BENCHMARK_IDS)]
+    ids = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS)]
     for call, params in (
         (lambda conn: queries.findings_for_control(conn, "AC-2(1)", scope), 1 + 2 * len(scope)),
         (lambda conn: queries.stigs_by_ids(conn, ids), len(ids)),
@@ -1089,7 +1084,7 @@ def test_the_cap__both_queries_it_sizes__stay_under_the_sqlite_variable_floor(kb
 
 
 def test_every_public_tool__no_knowledge_base__returns_not_ready_rather_than_raising(tmp_path, monkeypatch):
-    # Returned, not raised. The stig_ids cap raises because that is a caller error the
+    # Returned, not raised. The benchmark_ids cap raises because that is a caller error the
     # caller must fix; not_ready is not a caller error, the request is fine and the server
     # cannot serve it yet. In VS Code a raise is a failed tool call, a return is a result.
     #
@@ -1098,7 +1093,7 @@ def test_every_public_tool__no_knowledge_base__returns_not_ready_rather_than_rai
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
     kb = app_module.KnowledgeBase(tmp_path / "absent.sqlite")
     calls = (
-        lambda: tools.mitigations_for_technique(kb, "T1078"),
+        lambda: tools.defenses_for_technique(kb, "T1078"),
         lambda: tools.techniques_for_actor(kb, "G0016"),
         lambda: tools.resolve_system(kb, "RHEL 9"),
         lambda: tools.list_stigs(kb),
@@ -1120,14 +1115,14 @@ def test_every_public_tool__no_knowledge_base__returns_not_ready_rather_than_rai
         assert steps["stig-mcp-ingest"].endswith("stig_mcp.ingest.orchestrator")
 
 
-def test_mitigations_for_technique__a_ready_knowledge_base__answers_normally(kb_path):
+def test_defenses_for_technique__a_ready_knowledge_base__answers_normally(kb_path):
     kb = app_module.KnowledgeBase(kb_path)
-    result = tools.mitigations_for_technique(kb, "T1078", "RHEL 9 web server")
+    result = tools.defenses_for_technique(kb, "T1078", "RHEL 9 web server")
     assert result["technique"]["id"] == "T1078"
     assert "status" not in result
 
 
-def test_mitigations_for_technique__schema_outdated_kb__returns_not_ready_naming_the_reason(tmp_path, monkeypatch):
+def test_defenses_for_technique__schema_outdated_kb__returns_not_ready_naming_the_reason(tmp_path, monkeypatch):
     # The "schema version" paragraph in docs/operations.md claims a stale-schema knowledge
     # base "reports the outdated schema and tells you to re-run the ingest" through the tools.
     # This is the test that holds the tools to that claim.
@@ -1142,25 +1137,25 @@ def test_mitigations_for_technique__schema_outdated_kb__returns_not_ready_naming
     conn.commit()
     conn.close()
     kb = app_module.KnowledgeBase(db_path)
-    result = tools.mitigations_for_technique(kb, "T1078")
+    result = tools.defenses_for_technique(kb, "T1078")
     assert result["status"] == "not_ready"
     assert result["reason"] == "schema_outdated"
     assert any("rebuild" in step["why"].lower() for step in result["next"])
 
 
-def test_mitigations_for_technique__unreadable_kb__returns_not_ready_naming_the_file(tmp_path, monkeypatch):
+def test_defenses_for_technique__unreadable_kb__returns_not_ready_naming_the_file(tmp_path, monkeypatch):
     # Covers readiness.payload(kb, "unreadable") the way a caller reaches it: through a public tool.
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
     corrupt = tmp_path / "corrupt.sqlite"
     corrupt.write_bytes(b"not a database, just bytes")
     kb = app_module.KnowledgeBase(corrupt)
-    result = tools.mitigations_for_technique(kb, "T1078")
+    result = tools.defenses_for_technique(kb, "T1078")
     assert result["status"] == "not_ready"
     assert result["reason"] == "unreadable"
     assert any(str(corrupt) in step["why"] for step in result["next"])
 
 
-def test_techniques_for_actor__include_mitigations__acquires_the_connection_only_once(kb_path, monkeypatch):
+def test_techniques_for_actor__include_defenses__acquires_the_connection_only_once(kb_path, monkeypatch):
     # The per-technique expansion loop must reuse the connection techniques_for_actor already
     # acquired, not call kb.acquire() again per technique: acquire() closes any connection it
     # is holding on a not-ready or rebuilt transition (KnowledgeBase._close), so a second
@@ -1179,31 +1174,31 @@ def test_techniques_for_actor__include_mitigations__acquires_the_connection_only
         return real_acquire()
 
     monkeypatch.setattr(kb, "acquire", acquire_once)
-    result = tools.techniques_for_actor(kb, "APT29", system_description="RHEL 9", include_mitigations=True)
+    result = tools.techniques_for_actor(kb, "APT29", system_description="RHEL 9", include_defenses=True)
     technique = next(t for t in result["techniques"] if t["technique_id"] == "T1078")
     assert technique["controls"]
 
 
-def test_mitigations_for_technique__no_knowledge_base_and_over_cap_stig_ids__returns_not_ready(tmp_path, monkeypatch):
-    # The ordering is load bearing: readiness is checked BEFORE _check_stig_ids,
+def test_defenses_for_technique__no_knowledge_base_and_over_cap_benchmark_ids__returns_not_ready(tmp_path, monkeypatch):
+    # The ordering is load bearing: readiness is checked BEFORE _check_benchmark_ids,
     # because a caller cannot fix a malformed argument usefully while the server has no data
     # to answer from. Nothing else in this suite reaches the intersection of "no knowledge
-    # base" and "stig_ids over the cap": the not_ready tests all pass stig_ids=None, and the
+    # base" and "benchmark_ids over the cap": the not_ready tests all pass benchmark_ids=None, and the
     # cap tests all use a ready knowledge base. This is that intersection.
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
     kb = app_module.KnowledgeBase(tmp_path / "absent.sqlite")
-    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS + 1)]
-    result = tools.mitigations_for_technique(kb, "T1078", None, too_many)
+    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS + 1)]
+    result = tools.defenses_for_technique(kb, "T1078", None, too_many)
     assert result["status"] == "not_ready"
     assert result["reason"] == "no_knowledge_base"
 
 
-def test_techniques_for_actor__no_knowledge_base_and_over_cap_stig_ids__returns_not_ready(tmp_path, monkeypatch):
+def test_techniques_for_actor__no_knowledge_base_and_over_cap_benchmark_ids__returns_not_ready(tmp_path, monkeypatch):
     # The second entry point, tested separately for the same reason the cap tests are: a rule
     # wired into only one of two caller paths leaves the other unguarded.
     monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
     kb = app_module.KnowledgeBase(tmp_path / "absent.sqlite")
-    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_STIG_IDS + 1)]
+    too_many = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS + 1)]
     result = tools.techniques_for_actor(kb, "G0016", None, too_many)
     assert result["status"] == "not_ready"
     assert result["reason"] == "no_knowledge_base"
@@ -1281,7 +1276,7 @@ def test_version_gap_note__versions_equal_or_unknown__returns_none():
         ("T9500", {"attack_index": False}, "T9500 is not in the CTID mapping file (ATT&CK 16.1)"),
     ],
 )
-def test_mitigations_for_technique__currency_build__names_each_cause_end_to_end(
+def test_defenses_for_technique__currency_build__names_each_cause_end_to_end(
     tmp_path, technique_id, build, expected_start
 ):
     # Cause 1 needs the real ingest: _load_ctid_status reads CTID's raw pairs while the override
@@ -1290,8 +1285,8 @@ def test_mitigations_for_technique__currency_build__names_each_cause_end_to_end(
 
     build_kb(_currency_sources(tmp_path, **build), tmp_path / "kb.sqlite")
     conn = open_db_for_test(tmp_path / "kb.sqlite")
-    result = tools.mitigations_for_technique(kb_holder(conn), technique_id)
-    assert result["controls"] == []
+    result = tools.defenses_for_technique(kb_holder(conn), technique_id)
+    assert result["protect"]["controls"] == []
     assert any(n.startswith(expected_start) for n in result["notes"]), result["notes"]
     assert "Controls come from the CTID mapping for ATT&CK 16.1; technique data is ATT&CK 19.1." in result["notes"]
     assert result["sources"]["ctid_attack_version"] == "16.1"
@@ -1570,8 +1565,8 @@ def test_install_knowledge_base__path_with_a_tilde__expands_it(tmp_path, kb_path
     assert result["status"] == "installed"
 
 
-def test_mitigations_for_technique__sources_block__carries_the_installed_file_sha256(kb_path):
-    result = tools.mitigations_for_technique(app_module.KnowledgeBase(kb_path), "T1078")
+def test_defenses_for_technique__sources_block__carries_the_installed_file_sha256(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078")
     assert result["sources"]["kb_sha256"] == hashlib.sha256(kb_path.read_bytes()).hexdigest()
 
 
@@ -1672,3 +1667,314 @@ def test_install_knowledge_base__no_opener_given__downloads_through_the_truststo
     shutil.copyfile(kb_path, target)
     with pytest.raises(tools.CallerError, match="truststore-opener-reached"):
         tools.install_knowledge_base(app_module.KnowledgeBase(target))
+
+
+def test_defenses_for_technique__t1078__carries_protect_and_detect_sections(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", system_description="RHEL 9")
+    assert list(result) == ["summary", "technique", "resolved_systems", "protect", "detect", "notes", "sources"]
+    assert result["protect"]["mitigations"] == [
+        {"id": "M1026", "name": "Privileged Account Management"},
+        {"id": "M1027", "name": "Password Policies"},
+    ]
+    assert result["detect"]["detection_strategy"] == {"id": "DET0001", "name": "Detect Valid Account Abuse"}
+    assert [a["id"] for a in result["detect"]["analytics"]] == ["AN0001", "AN0002"]
+    assert all(system["catalog"] == "disa" for system in result["resolved_systems"])
+    assert result["protect"]["findings"]
+    assert all(finding["catalog"] == "disa" for finding in result["protect"]["findings"].values())
+    assert "description" not in result["protect"]["mitigations"][0]
+
+
+def test_defenses_for_technique__technique_without_a_strategy__detect_is_none_and_counts_zero(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078.001")
+    assert result["detect"] is None
+    assert result["summary"]["detection"] == {"analytics": 0}
+
+
+def test_defenses_for_technique__platforms_and_log_sources__flag_analytics_and_count_them(kb_path):
+    result = tools.defenses_for_technique(
+        app_module.KnowledgeBase(kb_path),
+        "T1078",
+        platforms=["Windows"],
+        log_sources=["WinEventLog:Security", "WinEventLog:Sysmon"],
+    )
+    flags = {a["id"]: (a["applicable"], a["detectable"]) for a in result["detect"]["analytics"]}
+    assert flags == {"AN0001": (True, True), "AN0002": (False, False)}
+    assert result["summary"]["detection"] == {"analytics": 2, "applicable": 1, "detectable": 1}
+
+
+def test_defenses_for_technique__platforms_only__omits_the_detectable_count(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", platforms=["Linux"])
+    assert result["summary"]["detection"] == {"analytics": 2, "applicable": 1}
+    assert all(a["detectable"] is None for a in result["detect"]["analytics"])
+
+
+def test_defenses_for_technique__unknown_platform__refuses_listing_the_vocabulary(kb_path):
+    with pytest.raises(tools.CallerError) as excinfo:
+        tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", platforms=["Windoze"])
+    message = str(excinfo.value)
+    assert "Windoze" in message
+    assert "Linux, Windows" in message
+
+
+def test_defenses_for_technique__unknown_log_source__refuses_naming_the_closest_names(kb_path):
+    with pytest.raises(tools.CallerError) as excinfo:
+        tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", log_sources=["WinEventLog:Secur"])
+    message = str(excinfo.value)
+    assert "WinEventLog:Secur" in message
+    assert "WinEventLog:Security" in message
+
+
+@pytest.mark.parametrize("bad", ["Windows", "WinEventLog:Security", []])
+def test_defenses_for_technique__a_bare_string_or_empty_list_for_a_filter__is_refused_not_iterated(kb_path, bad):
+    kb = app_module.KnowledgeBase(kb_path)
+    with pytest.raises(tools.CallerError, match="must be a non-empty list"):
+        tools.defenses_for_technique(kb, "T1078", platforms=bad)
+    with pytest.raises(tools.CallerError, match="must be a non-empty list"):
+        tools.defenses_for_technique(kb, "T1078", log_sources=bad)
+
+
+def test_defenses_for_technique__more_log_sources_than_the_cap__raises_naming_the_cap(kb_path):
+    too_many = [f"Source{i}" for i in range(tools._MAX_LOG_SOURCES + 1)]
+    with pytest.raises(tools.CallerError) as excinfo:
+        tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", log_sources=too_many)
+    message = str(excinfo.value)
+    assert str(tools._MAX_LOG_SOURCES) in message
+    assert str(len(too_many)) in message
+
+
+def test_defenses_for_technique__filters_are_validated_before_the_technique(kb_path):
+    # The vocabulary check happens even when the technique id is wrong, as severity is.
+    with pytest.raises(tools.CallerError, match="Windoze"):
+        tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T9999", platforms=["Windoze"])
+
+
+def test_defenses_for_technique__log_sources_exactly_at_the_cap__are_not_refused_for_count(kb_path, monkeypatch):
+    monkeypatch.setattr(tools, "_MAX_LOG_SOURCES", 2)
+    kb = app_module.KnowledgeBase(kb_path)
+    result = tools.defenses_for_technique(kb, "T1078", log_sources=["WinEventLog:Security", "WinEventLog:Sysmon"])
+    assert result["summary"]["detection"]["detectable"] == 1
+    with pytest.raises(tools.CallerError, match="over the limit of 2"):
+        tools.defenses_for_technique(
+            kb, "T1078", log_sources=["WinEventLog:Security", "WinEventLog:Sysmon", "auditd:SYSCALL"]
+        )
+
+
+def test_defenses_for_technique__unknown_log_source_with_an_unknown_technique__refuses_the_log_source(kb_path):
+    with pytest.raises(tools.CallerError, match="WinEventLog:Secur"):
+        tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T9999", log_sources=["WinEventLog:Secur"])
+
+
+_TELEMETRY = ["WinEventLog:Security", "WinEventLog:Sysmon"]
+
+
+def _apt29_coverage(defenses_kb, **kwargs):
+    kb = app_module.KnowledgeBase(defenses_kb)
+    return tools.techniques_for_actor(kb, "APT29", include_defenses=True, **kwargs)
+
+
+def test_techniques_for_actor__include_defenses__counts_every_coverage_class_distinctly(defenses_kb):
+    result = _apt29_coverage(defenses_kb, system_description="RHEL 9", platforms=["Windows"], log_sources=_TELEMETRY)
+    assert result["summary"]["coverage"] == {
+        "techniques": 8,
+        "without_mitigation": 3,
+        "mitigated_without_rules": 4,
+        "without_applicable_analytic": 1,
+        "detectable": 2,
+        "undetectable": 5,
+    }
+    keys = list(result["summary"])
+    # coverage leads the new counts so the gap counts land inside a client's preview.
+    assert keys.index("cat_i") < keys.index("coverage") < keys.index("mitigations") < keys.index("detection")
+    assert keys[-1] == "controls_with_rules"
+    assert result["summary"]["mitigations"] == 6
+    assert result["summary"]["detection"] == {"analytics": 10, "applicable": 7, "detectable": 2}
+
+
+def test_techniques_for_actor__include_defenses__each_technique_lists_its_defense_ids(defenses_kb):
+    result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=_TELEMETRY)
+    by_id = {t["technique_id"]: t for t in result["techniques"]}
+    assert by_id["T1078"]["mitigations"] == ["M1026", "M1027"]
+    assert by_id["T1078"]["detection_strategy"] == "DET0001"
+    assert [(a["id"], a["applicable"], a["detectable"]) for a in by_id["T1078"]["analytics"]] == [
+        ("AN0001", True, True),
+        ("AN0002", False, False),
+    ]
+    assert by_id["T9000"]["mitigations"] == ["M1027"]  # arrives only through the revoked-by redirect
+    assert by_id["T9002"]["mitigations"] == []
+    assert result["mitigations"] == {
+        "M1026": {"name": "Privileged Account Management"},
+        "M1027": {"name": "Password Policies"},
+    }
+    assert "description" not in result["mitigations"]["M1026"]
+
+
+def test_techniques_for_actor__one_of_two_sources__flips_t1078_to_undetectable(defenses_kb):
+    result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=["WinEventLog:Security"])
+    assert (result["summary"]["coverage"]["detectable"], result["summary"]["coverage"]["undetectable"]) == (1, 6)
+
+
+def test_techniques_for_actor__platforms_only__counts_only_the_applicability_gap(defenses_kb):
+    coverage = _apt29_coverage(defenses_kb, platforms=["Windows"])["summary"]["coverage"]
+    assert coverage == {"techniques": 8, "without_mitigation": 3, "without_applicable_analytic": 1}
+
+
+def test_techniques_for_actor__log_sources_only__partitions_every_technique(defenses_kb):
+    coverage = _apt29_coverage(defenses_kb, log_sources=_TELEMETRY)["summary"]["coverage"]
+    assert coverage == {"techniques": 8, "without_mitigation": 3, "detectable": 2, "undetectable": 6}
+
+
+def test_techniques_for_actor__no_scope__omits_mitigated_without_rules(defenses_kb):
+    coverage = _apt29_coverage(defenses_kb)["summary"]["coverage"]
+    assert coverage == {"techniques": 8, "without_mitigation": 3}
+
+
+def test_techniques_for_actor__without_include_defenses__carries_no_defense_fields(defenses_kb):
+    result = tools.techniques_for_actor(app_module.KnowledgeBase(defenses_kb), "APT29", platforms=["Windows"])
+    assert result["summary"] == {"techniques": 8}
+    assert all("mitigations" not in t and "analytics" not in t for t in result["techniques"])
+
+
+def test_techniques_for_actor__filters_are_validated_even_without_include_defenses(defenses_kb):
+    with pytest.raises(tools.CallerError, match="Windoze"):
+        tools.techniques_for_actor(app_module.KnowledgeBase(defenses_kb), "APT29", platforms=["Windoze"])
+
+
+def test_techniques_for_actor__inapplicable_detectable_analytic__does_not_make_the_technique_detectable(defenses_kb):
+    coverage = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=["auditd:SYSCALL"])["summary"][
+        "coverage"
+    ]
+    assert (coverage["detectable"], coverage["undetectable"]) == (1, 6)
+
+
+@pytest.mark.parametrize(
+    ("name", "bare", "example"),
+    [("log_sources", "WinEventLog:Security", "['WinEventLog:Security']"), ("platforms", "Windows", "['Windows']")],
+)
+def test_techniques_for_actor__a_bare_string_filter__shows_the_example_for_that_parameter(
+    defenses_kb, name, bare, example
+):
+    with pytest.raises(tools.CallerError, match=re.escape(f"{name}={example}")):
+        tools.techniques_for_actor(app_module.KnowledgeBase(defenses_kb), "APT29", **{name: bare})
+
+
+def test_techniques_for_actor__invalid_platform_with_an_unknown_actor__refuses_the_platform(defenses_kb):
+    with pytest.raises(tools.CallerError, match="Windoze"):
+        tools.techniques_for_actor(app_module.KnowledgeBase(defenses_kb), "No Such Actor", platforms=["Windoze"])
+
+
+def test_defense_details__mixed_ids__expand_each_and_list_the_misses(kb_path):
+    result = tools.defense_details(app_module.KnowledgeBase(kb_path), ["M1026", "det0001", "AN0003", "AN9999"])
+    assert [m["id"] for m in result["mitigations"]] == ["M1026"]
+    assert [s["id"] for s in result["detection_strategies"]] == ["DET0001"]
+    assert [a["id"] for a in result["analytics"]] == ["AN0003"]
+    assert result["not_found"] == ["AN9999"]
+    assert result["technique"] is None
+    assert "kb_sha256" in result["sources"]
+
+
+def test_defense_details__technique_id__adds_pair_text_and_follows_a_revoked_id(kb_path):
+    result = tools.defense_details(app_module.KnowledgeBase(kb_path), ["M1027"], technique_id="T8001")
+    assert result["technique"]["id"] == "T9000"
+    assert result["technique"]["redirected_from"] == "T8001"
+    assert result["mitigations"][0]["technique_description"] == "Reaches T9000 through the revocation."
+
+
+def test_defense_details__no_id_matches__refuses_naming_the_ids(kb_path):
+    with pytest.raises(tools.CallerError, match="'M9999'"):
+        tools.defense_details(app_module.KnowledgeBase(kb_path), ["M9999"])
+
+
+def test_defense_details__empty_or_over_cap__refuses_naming_the_cap(kb_path):
+    kb = app_module.KnowledgeBase(kb_path)
+    with pytest.raises(tools.CallerError, match="at least one"):
+        tools.defense_details(kb, [])
+    too_many = [f"AN{i:04d}" for i in range(tools._MAX_DEFENSE_IDS + 1)]
+    with pytest.raises(tools.CallerError, match=rf"over the limit of {tools._MAX_DEFENSE_IDS}"):
+        tools.defense_details(kb, too_many)
+
+
+def test_defense_details__exactly_the_cap__is_accepted(kb_path):
+    ids = [f"AN{i:04d}" for i in range(9000, 9000 + tools._MAX_DEFENSE_IDS - 1)] + ["M1026"]
+    assert len(ids) == tools._MAX_DEFENSE_IDS
+    result = tools.defense_details(app_module.KnowledgeBase(kb_path), ids)
+    assert [m["id"] for m in result["mitigations"]] == ["M1026"]
+    assert len(result["not_found"]) == tools._MAX_DEFENSE_IDS - 1
+
+
+def test_defense_details__padded_id__is_matched_not_reported_missing(kb_path):
+    result = tools.defense_details(app_module.KnowledgeBase(kb_path), [" M1026 "])
+    assert [m["id"] for m in result["mitigations"]] == ["M1026"]
+    assert result["not_found"] == []
+
+
+def test_defense_details__unknown_technique_id__refuses_with_search_guidance(kb_path):
+    with pytest.raises(tools.CallerError, match="Unknown technique_id 'T9999'"):
+        tools.defense_details(app_module.KnowledgeBase(kb_path), ["M1026"], technique_id="T9999")
+
+
+def test_defense_details__schema_outdated_knowledge_base__returns_not_ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "SOURCES_DIR", tmp_path)
+    db = tmp_path / "old.sqlite"
+    conn = create_db(db)
+    conn.execute("INSERT INTO ingest_meta (source_name, schema_version) VALUES ('test', '6')")
+    conn.commit()
+    conn.close()
+    result = tools.defense_details(app_module.KnowledgeBase(db), ["M1026"])
+    assert (result["status"], result["reason"]) == ("not_ready", "schema_outdated")
+
+
+_GAP_KEYS = ("without_mitigation", "mitigated_without_rules", "without_applicable_analytic", "undetectable")
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"system_description": "RHEL 9", "platforms": ["Windows"], "log_sources": _TELEMETRY},
+        {"system_description": "RHEL 9"},
+        {"platforms": ["Windows"]},
+        {"log_sources": _TELEMETRY},
+        {"platforms": ["Windows"], "log_sources": ["WinEventLog:Security"]},
+        {},
+    ],
+)
+def test_techniques_for_actor__include_defenses__each_gap_count_equals_the_techniques_naming_it(defenses_kb, filters):
+    result = _apt29_coverage(defenses_kb, **filters)
+    coverage = result["summary"]["coverage"]
+    for key in _GAP_KEYS:
+        naming = sum(1 for technique in result["techniques"] if key in technique["gaps"])
+        assert naming == coverage.get(key, 0), key
+
+
+def test_techniques_for_actor__include_defenses__lists_each_techniques_gaps_in_coverage_order(defenses_kb):
+    # The expected classes are the table in tests/fixtures/attack_defenses.py.
+    result = _apt29_coverage(defenses_kb, system_description="RHEL 9", platforms=["Windows"], log_sources=_TELEMETRY)
+    assert {t["technique_id"]: t["gaps"] for t in result["techniques"]} == {
+        "T1078": [],
+        "T9000": ["mitigated_without_rules", "without_applicable_analytic"],
+        "T9001": ["mitigated_without_rules"],
+        "T9002": ["without_mitigation", "undetectable"],
+        "T9003": ["mitigated_without_rules", "undetectable"],
+        "T9004": ["without_mitigation", "undetectable"],
+        "T9005": ["without_mitigation", "undetectable"],
+        "T9006": ["mitigated_without_rules", "undetectable"],
+    }
+
+
+def test_techniques_for_actor__without_include_defenses__lists_no_gaps(defenses_kb):
+    result = tools.techniques_for_actor(app_module.KnowledgeBase(defenses_kb), "APT29")
+    assert all("gaps" not in t for t in result["techniques"])
+
+
+def test_check_list__padded_and_repeated_names__are_stripped_and_deduplicated_in_order():
+    assert tools._check_list("log_sources", [" auditd:SYSCALL ", "WinEventLog:Security", "auditd:SYSCALL"]) == (
+        "auditd:SYSCALL",
+        "WinEventLog:Security",
+    )
+
+
+def test_defenses_for_technique__a_source_stored_with_trailing_whitespace__is_accepted_and_satisfies(kb_path):
+    # The fixture stores AN0002's second source as "auditd:EXECVE " with a trailing space.
+    result = tools.defenses_for_technique(
+        app_module.KnowledgeBase(kb_path), "T1078", log_sources=["auditd:SYSCALL", "auditd:EXECVE"]
+    )
+    assert {a["id"]: a["detectable"] for a in result["detect"]["analytics"]} == {"AN0001": False, "AN0002": True}

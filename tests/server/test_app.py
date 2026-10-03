@@ -42,21 +42,22 @@ def test_build_server__a_knowledge_base_at_the_wrong_schema__starts_and_reports_
     conn.commit()
     conn.close()
     server = build_server(db)
-    assert "mitigations_for_technique" in {t.name for t in asyncio.run(server.list_tools())}
+    assert "defenses_for_technique" in {t.name for t in asyncio.run(server.list_tools())}
     held, reason = app_module.KnowledgeBase(db).acquire()
     assert held is None and reason == "schema_outdated"
 
 
-def test_build_server__valid_kb__registers_eight_tools(kb_path):
+def test_build_server__valid_kb__registers_nine_tools(kb_path):
     server = build_server(kb_path)
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
-    # Equality, not `<=`: a subset assertion passes with a ninth tool registered, and the tool list is
-    # the server's whole published surface. The name says eight, so the test should hold it to eight.
+    # Equality, not `<=`: a subset assertion passes with a tenth tool registered, and the tool list is
+    # the server's whole published surface. The name says nine, so the test should hold it to nine.
     assert names == {
-        "mitigations_for_technique",
+        "defenses_for_technique",
         "techniques_for_actor",
         "finding_details",
+        "defense_details",
         "resolve_system",
         "search_techniques",
         "list_stigs",
@@ -142,13 +143,14 @@ def test_build_server__every_tool_called__reads_the_knowledge_base_on_the_event_
     monkeypatch.setattr(app_module.KnowledgeBase, "release", recording_release)
     server = build_server(live)
     calls = {
-        "mitigations_for_technique": {"technique_id": "T1078"},
+        "defenses_for_technique": {"technique_id": "T1078"},
         "techniques_for_actor": {"actor": "Cozy Bear"},
         "resolve_system": {"system_description": "RHEL 9"},
         "search_techniques": {"query": "valid accounts"},
         "list_stigs": {},
         "check_sources": {},
         "finding_details": {"ids": ["V-100001"]},
+        "defense_details": {"ids": ["M1026"]},
         "install_knowledge_base": {"path": str(xz), "sha256": xz_sha},
     }
 
@@ -225,7 +227,7 @@ def test_build_server__search_techniques_tool_called_with_no_knowledge_base__cro
     assert payload["next"]
 
 
-def test_build_server__mitigations_tool_called__scopes_to_the_described_system(kb_path):
+def test_build_server__defenses_tool_called__scopes_to_the_described_system(kb_path):
     # These exercise the registered tool bodies, which the direct tools.<name> tests
     # never reach. Where a test passes an optional argument it asserts a result only
     # the forwarded argument produces, so dropping the argument fails the test; the
@@ -233,7 +235,7 @@ def test_build_server__mitigations_tool_called__scopes_to_the_described_system(k
     server = build_server(kb_path)
     payload = _call(
         server,
-        "mitigations_for_technique",
+        "defenses_for_technique",
         {"technique_id": "T1078", "system_description": "Red Hat Enterprise Linux 9"},
     )
     assert payload["technique"]["id"] == "T1078"
@@ -244,7 +246,7 @@ def test_build_server__mitigations_tool_called__scopes_to_the_described_system(k
     ("name", "arguments", "guidance"),
     [
         (
-            "mitigations_for_technique",
+            "defenses_for_technique",
             {"technique_id": "T9999"},
             "Unknown technique_id 'T9999'. Call search_techniques",
         ),
@@ -254,12 +256,12 @@ def test_build_server__mitigations_tool_called__scopes_to_the_described_system(k
             "Unknown actor 'No Such Group'. Provide an ATT&CK group id",
         ),
         (
-            "mitigations_for_technique",
-            {"technique_id": "T1078", "stig_ids": [f"S{i}" for i in range(201)]},
-            "stig_ids names 201 benchmarks, over the limit of 200",
+            "defenses_for_technique",
+            {"technique_id": "T1078", "benchmark_ids": [f"S{i}" for i in range(201)]},
+            "benchmark_ids names 201 benchmarks, over the limit of 200",
         ),
     ],
-    ids=["unknown_technique", "unknown_actor", "too_many_stig_ids"],
+    ids=["unknown_technique", "unknown_actor", "too_many_benchmark_ids"],
 )
 def test_build_server__tool_rejects_its_arguments__surfaces_the_guidance(kb_path, name, arguments, guidance):
     # MCPServer replaces an ordinary exception's message with "Error executing tool ...", so a
@@ -289,22 +291,22 @@ def test_build_server__techniques_for_actor_tool_given_loose_spacing__resolves_a
     assert payload["actor"]["matched_as"] == "APT29"
 
 
-def test_build_server__mitigations_tool_called_with_explicit_stig_ids__uses_them_as_scope(kb_path):
+def test_build_server__defenses_tool_called_with_explicit_benchmark_ids__uses_them_as_scope(kb_path):
     server = build_server(kb_path)
     payload = _call(
         server,
-        "mitigations_for_technique",
-        {"technique_id": "T1078", "stig_ids": ["RHEL_9_STIG"]},
+        "defenses_for_technique",
+        {"technique_id": "T1078", "benchmark_ids": ["RHEL_9_STIG"]},
     )
     assert [s["stig_id"] for s in payload["resolved_systems"]] == ["RHEL_9_STIG"]
 
 
-def test_build_server__techniques_for_actor_tool_called_with_mitigations__expands_them(kb_path):
+def test_build_server__techniques_for_actor_tool_called_with_defenses__expands_them(kb_path):
     server = build_server(kb_path)
     payload = _call(
         server,
         "techniques_for_actor",
-        {"actor": "Cozy Bear", "system_description": "Red Hat Enterprise Linux 9", "include_mitigations": True},
+        {"actor": "Cozy Bear", "system_description": "Red Hat Enterprise Linux 9", "include_defenses": True},
     )
     assert payload["techniques"][0]["controls"]
     assert payload["findings"]
@@ -402,15 +404,15 @@ def test_main__unreadable_kb__warns_and_starts_anyway(tmp_path, monkeypatch, cap
 def test_build_server__mitigations_description__advertises_revoked_id_handling(kb_path):
     server = build_server(kb_path)
     tools_listed = asyncio.run(server.list_tools())
-    description = next(t.description for t in tools_listed if t.name == "mitigations_for_technique")
+    description = next(t.description for t in tools_listed if t.name == "defenses_for_technique")
     assert "revoked" in description.lower()
     assert "redirected_from" in description
 
 
-def test_build_server__mitigations_description__tells_the_agent_a_build_is_meaningful(kb_path):
+def test_build_server__defenses_description__tells_the_agent_a_build_is_meaningful(kb_path):
     server = build_server(kb_path)
     tools_listed = asyncio.run(server.list_tools())
-    description = next(t.description for t in tools_listed if t.name == "mitigations_for_technique")
+    description = next(t.description for t in tools_listed if t.name == "defenses_for_technique")
     assert "build" in description.lower()
     assert "8.0 U3" in description
 
@@ -422,9 +424,9 @@ def test_build_server__resolve_system_description__tells_the_agent_a_build_is_me
     assert "build" in description.lower()
 
 
-def test_build_server__mitigations_tool_called_with_a_revoked_id__redirects(kb_path):
+def test_build_server__defenses_tool_called_with_a_revoked_id__redirects(kb_path):
     server = build_server(kb_path)
-    payload = _call(server, "mitigations_for_technique", {"technique_id": "T8001"})
+    payload = _call(server, "defenses_for_technique", {"technique_id": "T8001"})
     assert payload["technique"]["id"] == "T9000"
     assert payload["technique"]["redirected_from"] == "T8001"
 
@@ -448,7 +450,7 @@ def test_build_server__no_knowledge_base__still_starts_and_lists_tools(tmp_path)
     # with the reason behind an output pane; a server that starts can explain itself.
     server = build_server(tmp_path / "absent.sqlite")
     names = {t.name for t in asyncio.run(server.list_tools())}
-    assert "mitigations_for_technique" in names
+    assert "defenses_for_technique" in names
 
 
 def test_knowledge_base__a_kb_appearing_after_start__is_picked_up_without_a_restart(tmp_path, kb_path):
@@ -542,8 +544,8 @@ def test_knowledge_base__path__is_read_only(tmp_path):
         holder.path = tmp_path / "other.sqlite"
 
 
-def test_build_server__both_stig_ids_descriptions__quote_the_cap_the_code_enforces(kb_path):
-    # The limit is written in FOUR places: tools._MAX_STIG_IDS, the two published tool
+def test_build_server__both_benchmark_ids_descriptions__quote_the_cap_the_code_enforces(kb_path):
+    # The limit is written in FOUR places: tools._MAX_BENCHMARK_IDS, the two published tool
     # descriptions that tell an agent about it before it hits the error, and docs/user-guide.md,
     # which is where a human reads it first. Nothing makes them agree, and a published limit
     # that is stale is worse than one that is absent, because the reader will believe it.
@@ -560,19 +562,29 @@ def test_build_server__both_stig_ids_descriptions__quote_the_cap_the_code_enforc
     published = {t.name: t.description for t in tools_listed}
     guide = Path(__file__).parent.parent.parent / "docs" / "user-guide.md"
     published["docs/user-guide.md"] = guide.read_text()
-    for name in ("mitigations_for_technique", "techniques_for_actor", "docs/user-guide.md"):
+    for name in ("defenses_for_technique", "techniques_for_actor", "docs/user-guide.md"):
         # Every "at most N" must agree, rather than there being exactly one: the guide states
         # the cap and then repeats it in the batching advice. A set comparison still fails on a
         # second, DISAGREEING limit, which is the case worth catching.
         found = re.findall(r"at most (\d+)", published[name])
-        assert found, f"{name} no longer states the cap as 'at most {tools._MAX_STIG_IDS}'"
-        assert set(found) == {str(tools._MAX_STIG_IDS)}, f"{name} advertises {sorted(set(found))}"
-        assert "stig_ids" in published[name], name
+        assert found, f"{name} no longer states the cap as 'at most {tools._MAX_BENCHMARK_IDS}'"
+        assert set(found) == {str(tools._MAX_BENCHMARK_IDS)}, f"{name} advertises {sorted(set(found))}"
+        assert "benchmark_ids" in published[name], name
+
+
+def test_build_server__both_log_sources_descriptions__quote_the_cap_the_code_enforces(kb_path):
+    # Phrased "takes up to N names", not "at most N": the benchmark_ids guard above reads every
+    # "at most N" in these two descriptions. The number is extracted, not tested for containment.
+    published = {t.name: t.description for t in asyncio.run(build_server(kb_path).list_tools())}
+    for name in ("defenses_for_technique", "techniques_for_actor"):
+        found = re.findall(r"log_sources\s+takes\s+up\s+to\s+(\d+)\s+names", published[name])
+        assert found, f"{name} no longer states the log_sources cap"
+        assert set(found) == {str(tools._MAX_LOG_SOURCES)}, f"{name} advertises {sorted(set(found))}"
 
 
 def test_build_server__any_state__lists_check_sources(tmp_path):
     names = {t.name for t in asyncio.run(build_server(tmp_path / "absent.sqlite").list_tools())}
-    assert {"check_sources", "mitigations_for_technique", "list_stigs"} <= names
+    assert {"check_sources", "defenses_for_technique", "list_stigs"} <= names
 
 
 def test_build_server__check_sources_tool_called__forwards_to_tools_check_sources(kb_path, monkeypatch):
@@ -602,11 +614,11 @@ def test_build_server__install_then_answer__first_run_without_a_knowledge_base(t
     github.publish("kb-2026-10-04", kb_path.read_bytes())
     monkeypatch.setattr(releases, "default_opener", lambda: github)
     server = build_server(tmp_path / "data" / "stig_kb.sqlite")
-    before = _call(server, "mitigations_for_technique", {"technique_id": "T1078"})
+    before = _call(server, "defenses_for_technique", {"technique_id": "T1078"})
     assert before["next"][0]["tool"] == "install_knowledge_base"
     installed = _call(server, "install_knowledge_base", {})
     assert installed["status"] == "installed"
-    answer = _call(server, "mitigations_for_technique", {"technique_id": "T1078"})
+    answer = _call(server, "defenses_for_technique", {"technique_id": "T1078"})
     assert answer["technique"]["id"] == "T1078"
     assert answer["sources"]["kb_sha256"] == installed["installed"]["sha256"]["sqlite"]
     assert _call(server, "check_sources", {})["action"] == "none"
@@ -652,3 +664,27 @@ def test_app_module__every_function__is_under_fifty_lines():
         if isinstance(n, ast.FunctionDef) and n.end_lineno - n.lineno + 1 > 50
     }
     assert long == {}, f"over the 50-line limit: {long}"
+
+
+def test_build_server__defenses_for_technique_tool__forwards_platforms_and_log_sources(kb_path):
+    payload = _call(
+        build_server(kb_path),
+        "defenses_for_technique",
+        {
+            "technique_id": "T1078",
+            "platforms": ["Windows"],
+            "log_sources": ["WinEventLog:Security", "WinEventLog:Sysmon"],
+        },
+    )
+    flagged = {a["id"]: (a["applicable"], a["detectable"]) for a in payload["detect"]["analytics"]}
+    assert flagged["AN0001"] == (True, True)
+
+
+def test_build_server__techniques_for_actor_tool__forwards_platforms_and_log_sources(defenses_kb):
+    payload = _call(
+        build_server(defenses_kb),
+        "techniques_for_actor",
+        {"actor": "APT29", "include_defenses": True, "platforms": ["Windows"], "log_sources": ["WinEventLog:Security"]},
+    )
+    assert payload["summary"]["coverage"]["detectable"] == 1
+    assert payload["summary"]["coverage"]["without_applicable_analytic"] == 1

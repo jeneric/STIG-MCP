@@ -226,7 +226,7 @@ def test_resolve__benchmark_with_two_majors__returns_both_versions(tmp_path):
 
 
 def test_resolve__any_hit__carries_the_same_provenance_as_an_explicit_scope(tie_kb):
-    # resolved_systems must have one shape whether the caller passed stig_ids or a
+    # resolved_systems must have one shape whether the caller passed benchmark_ids or a
     # description; otherwise a description-scoped answer loses its citation silently.
     hit = resolve(tie_kb, "Example Product")[0]
     assert set(hit) >= {

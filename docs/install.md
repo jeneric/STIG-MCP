@@ -48,7 +48,7 @@ Instead of the badge, run **MCP: Open User Configuration** from the Command Pale
 2. Command Palette (`Ctrl+Shift+P`, or `Cmd+Shift+P` on macOS) and run
    **MCP: List Servers**, select `stig-mcp`, then **Start**. Trust the server when
    prompted, since it runs a local command.
-3. Click **Configure Tools** in the chat input to confirm the eight tools are listed
+3. Click **Configure Tools** in the chat input to confirm the nine tools are listed
    and enabled.
 4. Reference a tool explicitly to verify the wiring, rather than hoping the model
    picks it up on its own. See [user-guide.md](user-guide.md)'s "Getting the

@@ -61,7 +61,7 @@ class FakeGitHub:
             self.bodies[releases.TAG_URL.format(tag=entry["tag_name"])] = json.dumps(entry).encode()
 
     # Six params, one per varying release field, so a test names only the ones it changes.
-    def publish(self, tag, kb_bytes, schema="6", built_with="0.1.0", upstream=None, draft=False):  # noqa: PLR0913
+    def publish(self, tag, kb_bytes, schema="7", built_with="0.1.0", upstream=None, draft=False):  # noqa: PLR0913
         """A release as the CI workflow will publish it, newest first like GitHub's listing."""
         date = tag.removeprefix("kb-")
         xz_name = f"stig_kb-schema{schema}-{date}.sqlite.xz"
