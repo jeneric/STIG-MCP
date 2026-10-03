@@ -136,7 +136,7 @@ def test_report__installed_release_republished_with_different_bytes__stays_none(
 
 def test_report__only_a_higher_schema_release_exists__fetches_its_release_json_once(tmp_path):
     github = FakeGitHub()
-    github.publish("kb-2026-10-11", b"schema 7 bytes", schema="7", built_with="0.3.0")
+    github.publish("kb-2026-10-11", b"schema 8 bytes", schema="8", built_with="0.3.0")
     result = freshness.report(tmp_path / "absent.sqlite", None, {}, github)
     assert result["action"] == "upgrade_package"
     assert result["action"] in freshness.ACTIONS
@@ -200,7 +200,7 @@ def test_report__rebuilt_locally_after_an_install__is_judged_as_a_local_build(tm
 def test_report__newer_release_needs_a_higher_schema__action_upgrade_package(tmp_path, kb_path):
     github = FakeGitHub()
     github.publish("kb-2026-10-04", kb_path.read_bytes())
-    github.publish("kb-2026-10-11", b"schema 7 bytes", schema="7", built_with="0.3.0")
+    github.publish("kb-2026-10-11", b"schema 8 bytes", schema="8", built_with="0.3.0")
     target = tmp_path / "data" / "stig_kb.sqlite"
     install.install_release(target, release="kb-2026-10-04", opener=github)
     result = freshness.report(target, _sha(target), _meta(target), github)
@@ -243,7 +243,7 @@ def test_report__no_release_at_all_and_the_installed_kb_is_outdated__build_local
 
 def test_report__only_a_higher_schema_release_and_nothing_installed__action_upgrade_package(tmp_path):
     github = FakeGitHub()
-    github.publish("kb-2026-10-11", b"schema 7 bytes", schema="7", built_with="0.3.0")
+    github.publish("kb-2026-10-11", b"schema 8 bytes", schema="8", built_with="0.3.0")
     action = freshness.report(tmp_path / "absent.sqlite", None, {}, github)["action"]
     assert action == "upgrade_package"
     assert action in freshness.ACTIONS

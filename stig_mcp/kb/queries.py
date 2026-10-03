@@ -1,3 +1,6 @@
+import json
+import re
+
 from stig_mcp.kb import actor_match
 
 _CAT_ORDER = "CASE severity_cat WHEN 'I' THEN 1 WHEN 'II' THEN 2 ELSE 3 END"
@@ -124,6 +127,7 @@ def findings_for_control(conn, control_id, scope, severities=None):
     ccis_by_rule = _ccis_by_rule(conn, [r["rule_id"] for r in rows])
     return [
         {
+            "catalog": "disa",
             "stig_id": r["stig_id"],
             "stig_version": r["stig_version"],
             "rule_id": r["rule_id"],
@@ -155,6 +159,7 @@ def finding_details(conn, ids):
     ccis_by_rule = _ccis_by_rule(conn, [r["rule_id"] for r in rows])
     return [
         {
+            "catalog": "disa",
             "stig_id": r["stig_id"],
             "stig_version": r["stig_version"],
             "stig_title": r["stig_title"],
@@ -295,7 +300,7 @@ def list_stigs(conn, filter=None):
 def stigs_by_ids(conn, stig_ids):
     """Full rows for explicitly named benchmark ids, one per version the KB holds.
     A single IN query rather than one per id, because techniques_for_actor expands
-    mitigations per technique and would otherwise re-query for every one of them."""
+    defenses per technique and would otherwise re-query for every one of them."""
     if not stig_ids:
         return []
     # placeholders is only bound "?" markers (one per stig_id); the stig_id VALUES are
@@ -366,3 +371,193 @@ def revocation(conn, technique_id):
         "replacement_id": row["replacement_id"],
         "revoked_name": row["revoked_name"],
     }
+
+
+_DEFENSE_ID = re.compile(r"^(M|DET|AN)\d+$")
+
+
+def _platforms(row_value):
+    return row_value.split(",") if row_value else []
+
+
+def mitigations_for_technique(conn, technique_id):
+    rows = conn.execute(
+        """
+        SELECT m.mitigation_id, m.name
+        FROM technique_mitigation tm JOIN mitigations m ON m.mitigation_id = tm.mitigation_id
+        WHERE tm.technique_id = ? ORDER BY m.mitigation_id
+        """,
+        (technique_id,),
+    ).fetchall()
+    return [{"id": r["mitigation_id"], "name": r["name"]} for r in rows]
+
+
+def _flag(value):
+    return None if value is None else bool(value)
+
+
+def detection_for_technique(conn, technique_id, platforms=None, log_sources=None):
+    """The technique's detection strategy and analytics, each flagged against the caller's
+    platforms and telemetry. The schema admits two strategies per technique; the lowest id
+    answers, since 19.2 holds exactly one and nothing distinguishes a second."""
+    strategy = conn.execute(
+        "SELECT detection_strategy_id, name FROM detection_strategies WHERE technique_id = ? "
+        "ORDER BY detection_strategy_id LIMIT 1",
+        (technique_id,),
+    ).fetchone()
+    if strategy is None:
+        return None
+    applicable_sql, params = "NULL", []
+    if platforms:
+        # Delimited so 'SaaS' never matches inside another name; no platform name holds a comma.
+        applicable_sql = " OR ".join("instr(',' || a.platforms || ',', ?) > 0" for _ in platforms)
+        params += [f",{platform}," for platform in platforms]
+    detectable_sql = "NULL"
+    if log_sources:
+        placeholders = ",".join("?" for _ in log_sources)
+        # Both halves are load bearing: an analytic naming no log source is never detectable, and
+        # one naming two needs both collected.
+        detectable_sql = (
+            "EXISTS (SELECT 1 FROM analytic_log_sources l WHERE l.analytic_id = a.analytic_id) "  # noqa: S608
+            "AND NOT EXISTS (SELECT 1 FROM analytic_log_sources l WHERE l.analytic_id = a.analytic_id "
+            f"AND l.name NOT IN ({placeholders}))"
+        )
+        params += list(log_sources)
+    rows = conn.execute(
+        f"""
+        SELECT a.analytic_id, a.name, a.platforms, ({applicable_sql}) AS applicable, ({detectable_sql}) AS detectable
+        FROM analytics a WHERE a.detection_strategy_id = ? ORDER BY a.analytic_id
+        """,  # noqa: S608
+        [*params, strategy["detection_strategy_id"]],
+    ).fetchall()
+    return {
+        "detection_strategy": {"id": strategy["detection_strategy_id"], "name": strategy["name"]},
+        "analytics": [
+            {
+                "id": r["analytic_id"],
+                "name": r["name"],
+                "platforms": _platforms(r["platforms"]),
+                "applicable": _flag(r["applicable"]),
+                "detectable": _flag(r["detectable"]),
+            }
+            for r in rows
+        ],
+    }
+
+
+def _log_sources_of(conn, analytic_id):
+    rows = conn.execute(
+        """
+        SELECT l.name, l.channel, d.data_component_id, d.name AS component_name
+        FROM analytic_log_sources l LEFT JOIN data_components d ON d.data_component_id = l.data_component_id
+        WHERE l.analytic_id = ? ORDER BY l.name, l.channel
+        """,
+        (analytic_id,),
+    ).fetchall()
+    return [
+        {
+            "name": r["name"],
+            "channel": r["channel"],
+            "data_component": {"id": r["data_component_id"], "name": r["component_name"]}
+            if r["data_component_id"]
+            else None,
+        }
+        for r in rows
+    ]
+
+
+def _full_analytic(conn, row):
+    return {
+        "id": row["analytic_id"],
+        "detection_strategy_id": row["detection_strategy_id"],
+        "name": row["name"],
+        "description": row["description"],
+        "platforms": _platforms(row["platforms"]),
+        "log_sources": _log_sources_of(conn, row["analytic_id"]),
+        "mutable_elements": json.loads(row["mutable_elements"] or "[]"),
+    }
+
+
+def _mitigation_details(conn, ids, technique_id):
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"""
+        SELECT m.mitigation_id, m.name, m.description,
+               (SELECT COUNT(*) FROM technique_mitigation tm
+                 WHERE tm.mitigation_id = m.mitigation_id) AS technique_count,
+               (SELECT tm.description FROM technique_mitigation tm
+                 WHERE tm.mitigation_id = m.mitigation_id AND tm.technique_id = ?) AS technique_description
+        FROM mitigations m WHERE m.mitigation_id IN ({placeholders}) ORDER BY m.mitigation_id
+        """,  # noqa: S608
+        [technique_id, *ids],
+    ).fetchall()
+    return [
+        {
+            "id": r["mitigation_id"],
+            "name": r["name"],
+            "description": r["description"],
+            "technique_count": r["technique_count"],
+            "technique_description": r["technique_description"],
+        }
+        for r in rows
+    ]
+
+
+def _strategy_details(conn, ids):
+    placeholders = ",".join("?" for _ in ids)
+    strategies = conn.execute(
+        f"SELECT detection_strategy_id, technique_id, name FROM detection_strategies "  # noqa: S608
+        f"WHERE detection_strategy_id IN ({placeholders}) ORDER BY detection_strategy_id",
+        ids,
+    ).fetchall()
+    details = []
+    for s in strategies:
+        analytics = conn.execute(
+            "SELECT * FROM analytics WHERE detection_strategy_id = ? ORDER BY analytic_id",
+            (s["detection_strategy_id"],),
+        ).fetchall()
+        details.append(
+            {
+                "id": s["detection_strategy_id"],
+                "name": s["name"],
+                "technique_id": s["technique_id"],
+                "analytics": [_full_analytic(conn, a) for a in analytics],
+            }
+        )
+    return details
+
+
+def _analytic_details(conn, ids):
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT * FROM analytics WHERE analytic_id IN ({placeholders}) ORDER BY analytic_id",  # noqa: S608
+        ids,
+    ).fetchall()
+    return [_full_analytic(conn, r) for r in rows]
+
+
+def defense_details(conn, ids, technique_id=None):
+    """Mitigations, strategies and analytics by MITRE id, case-insensitive; an id of no
+    recognizable shape matches nothing and the caller reports it in not_found."""
+    wanted = sorted({finding_id.strip().upper() for finding_id in ids})
+    by_prefix = {"M": [], "DET": [], "AN": []}
+    for defense_id in wanted:
+        match = _DEFENSE_ID.match(defense_id)
+        if match:
+            by_prefix[match.group(1)].append(defense_id)
+    return {
+        "mitigations": _mitigation_details(conn, by_prefix["M"], technique_id) if by_prefix["M"] else [],
+        "detection_strategies": _strategy_details(conn, by_prefix["DET"]) if by_prefix["DET"] else [],
+        "analytics": _analytic_details(conn, by_prefix["AN"]) if by_prefix["AN"] else [],
+    }
+
+
+def platform_names(conn):
+    names = set()
+    for (value,) in conn.execute("SELECT platforms FROM analytics"):
+        names.update(_platforms(value))
+    return sorted(names)
+
+
+def log_source_names(conn):
+    return [r[0] for r in conn.execute("SELECT DISTINCT name FROM analytic_log_sources ORDER BY name")]

@@ -1,3 +1,4 @@
+import json
 import string
 from pathlib import Path
 
@@ -6,8 +7,89 @@ import pytest
 from stig_mcp.ingest.inventory import DiscoveredBenchmark
 from stig_mcp.ingest.orchestrator import IngestSources, _keywords, build_kb
 from stig_mcp.kb.db import create_db, open_db
+from tests.fixtures.attack_defenses import EXTRA_OBJECTS
 
 FIX = Path(__file__).parent / "fixtures"
+
+
+def defense_edges_to_an_intrusion_set():
+    """A strategy with one analytic, plus a mitigates edge, both aimed at the APT29 intrusion set
+    rather than a technique. ATT&CK 19.1 and 19.2 have none; the parser must not mistake a G-id for a T-id."""
+    return [
+        {
+            "type": "x-mitre-analytic",
+            "id": "x-mitre-analytic--an0098",
+            "name": "Analytic 0098",
+            "x_mitre_platforms": ["Windows"],
+            "x_mitre_log_source_references": [{"name": "WinEventLog:System", "channel": "EventCode=7045"}],
+            "external_references": [{"source_name": "mitre-attack", "external_id": "AN0098"}],
+        },
+        {
+            "type": "x-mitre-detection-strategy",
+            "id": "x-mitre-detection-strategy--det0098",
+            "name": "Strategy aimed at a group",
+            "x_mitre_analytic_refs": ["x-mitre-analytic--an0098"],
+            "external_references": [{"source_name": "mitre-attack", "external_id": "DET0098"}],
+        },
+        {
+            "type": "relationship",
+            "relationship_type": "detects",
+            "source_ref": "x-mitre-detection-strategy--det0098",
+            "target_ref": "intrusion-set--g0016",
+        },
+        {
+            "type": "relationship",
+            "relationship_type": "mitigates",
+            "source_ref": "course-of-action--m1026",
+            "target_ref": "intrusion-set--g0016",
+            "description": "aimed at a group",
+        },
+    ]
+
+
+def minimal_defenses(technique_stix_id):
+    """The smallest set of defensive objects that satisfies require_defenses: one mitigation,
+    one strategy with one analytic, and the two edges that attach them to one technique."""
+    return [
+        {
+            "type": "course-of-action",
+            "id": "course-of-action--m0000",
+            "name": "Minimal Mitigation",
+            "description": "fixture",
+            "external_references": [{"source_name": "mitre-attack", "external_id": "M0000"}],
+        },
+        {
+            "type": "relationship",
+            "relationship_type": "mitigates",
+            "source_ref": "course-of-action--m0000",
+            "target_ref": technique_stix_id,
+            "description": "fixture",
+        },
+        {
+            "type": "x-mitre-analytic",
+            "id": "x-mitre-analytic--an0000",
+            "name": "Analytic 0000",
+            "description": "fixture",
+            "x_mitre_platforms": ["Windows"],
+            "x_mitre_log_source_references": [{"name": "WinEventLog:Security", "channel": "EventCode=4624"}],
+            "x_mitre_mutable_elements": [],
+            "external_references": [{"source_name": "mitre-attack", "external_id": "AN0000"}],
+        },
+        {
+            "type": "x-mitre-detection-strategy",
+            "id": "x-mitre-detection-strategy--det0000",
+            "name": "Minimal Strategy",
+            "x_mitre_analytic_refs": ["x-mitre-analytic--an0000"],
+            "external_references": [{"source_name": "mitre-attack", "external_id": "DET0000"}],
+        },
+        {
+            "type": "relationship",
+            "relationship_type": "detects",
+            "source_ref": "x-mitre-detection-strategy--det0000",
+            "target_ref": technique_stix_id,
+        },
+    ]
+
 
 # Connections a test opened through open_db_for_test, drained by the autouse fixture below. A module
 # global rather than fixture state so open_db_for_test can stay a plain function: making it a fixture
@@ -140,6 +222,29 @@ def kb_path(tmp_path_factory):
             benchmarks=[discovered(FIX / "rhel9_xccdf.xml"), discovered(FIX / "win2022_xccdf.xml")],
             cci_path=FIX / "cci_list.xml",
             attack_path=FIX / "attack_bundle.json",
+            ctid_path=FIX / "ctid_mappings.csv",
+            overrides_path=FIX / "overrides.yaml",
+            catalog_path=FIX / "oscal_catalog.json",
+        ),
+        out,
+    )
+    return out
+
+
+@pytest.fixture(scope="session")
+def defenses_kb(tmp_path_factory):
+    """kb_path's sources with APT29 using eight techniques of distinct defensive shape; see
+    tests/fixtures/attack_defenses.py for the table of expected counts."""
+    out_dir = tmp_path_factory.mktemp("defenses")
+    bundle = json.loads((FIX / "attack_bundle.json").read_text())
+    bundle["objects"] += EXTRA_OBJECTS
+    (out_dir / "bundle.json").write_text(json.dumps(bundle))
+    out = out_dir / "kb.sqlite"
+    build_kb(
+        IngestSources(
+            benchmarks=[discovered(FIX / "rhel9_xccdf.xml"), discovered(FIX / "win2022_xccdf.xml")],
+            cci_path=FIX / "cci_list.xml",
+            attack_path=out_dir / "bundle.json",
             ctid_path=FIX / "ctid_mappings.csv",
             overrides_path=FIX / "overrides.yaml",
             catalog_path=FIX / "oscal_catalog.json",

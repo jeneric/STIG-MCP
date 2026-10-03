@@ -303,7 +303,7 @@ def test_resolve__a_digit_run_too_long_for_int_conversion__still_answers(wide_kb
     """A caller-supplied digit run longer than CPython's int_max_str_digits (4300) must not
     abort the call. Such a token reaches int() in two places: the coverage key on the silence
     path and the version sort on the verdict path. Either would raise ValueError out of
-    resolve(), through both mitigations_for_technique and resolve_system.
+    resolve(), through both defenses_for_technique and resolve_system.
 
     wide_kb, not kb_path: with two benchmarks nothing is distinctive, so _version_coverage
     returns at its first gate and neither conversion is ever reached, and the test would pass
@@ -621,7 +621,7 @@ def test_parse_listing__tag_with_path_traversal__is_not_a_kb_release():
         "prerelease": False,
         "assets": [
             {
-                "name": "stig_kb-schema6-2026-10-04.sqlite.xz",
+                "name": "stig_kb-schema7-2026-10-04.sqlite.xz",
                 "size": 1,
                 "browser_download_url": f"{releases.DOWNLOAD_PREFIX}kb-2026-10-04/../../evil/x",
             }
@@ -632,7 +632,7 @@ def test_parse_listing__tag_with_path_traversal__is_not_a_kb_release():
 
 def test_parse_listing__asset_name_with_path_traversal__is_ignored():
     tag = "kb-2026-10-04"
-    name = "../stig_kb-schema6-2026-10-04.sqlite.xz"
+    name = "../stig_kb-schema7-2026-10-04.sqlite.xz"
     entry = {
         "tag_name": tag,
         "draft": False,
@@ -644,7 +644,7 @@ def test_parse_listing__asset_name_with_path_traversal__is_ignored():
 
 def test_parse_listing__asset_url_outside_the_repository__refuses_the_listing():
     tag = "kb-2026-10-04"
-    name = "stig_kb-schema6-2026-10-04.sqlite.xz"
+    name = "stig_kb-schema7-2026-10-04.sqlite.xz"
     entry = {
         "tag_name": tag,
         "draft": False,
@@ -854,7 +854,7 @@ def test_install_file__knowledge_base_for_another_schema__refuses_naming_both(tm
     with sqlite3.connect(old) as conn:
         conn.execute("UPDATE ingest_meta SET schema_version = '5'")
     conn.close()
-    with pytest.raises(install.InstallError, match=r"schema 5.*schema 6"):
+    with pytest.raises(install.InstallError, match=r"schema 5.*schema 7"):
         install.install_file(old, hashlib.sha256(old.read_bytes()).hexdigest(), data_dir / "stig_kb.sqlite")
     assert _installed_state(data_dir) == before
 
@@ -1077,7 +1077,7 @@ def test_parse_release_json__upstream_value_over_the_limit__is_dropped():
     github.publish("kb-2026-10-04", b"kb bytes")
     [release] = releases.list_releases(github)
     doc = {
-        "schema": "6",
+        "schema": "7",
         "built_with": "0.2.0",
         "sha256": {"xz": "a" * 64, "sqlite": "b" * 64},
         "upstream": {"kept": "k" * 100, "dropped": "d" * 101},

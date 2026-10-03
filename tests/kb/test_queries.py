@@ -386,3 +386,153 @@ def test_search_techniques__two_revoked_ids_redirect_to_one_technique__reports_t
 def test_search_techniques__limit__applies_after_redirects_are_merged(kb_path):
     conn = open_db_for_test(kb_path)
     assert len(queries.search_techniques(conn, "T8001", limit=1)) == 1
+
+
+def test_mitigations_for_technique__t1078__lists_both_m_ids_by_id(kb_path):
+    conn = open_db_for_test(kb_path)
+    assert queries.mitigations_for_technique(conn, "T1078") == [
+        {"id": "M1026", "name": "Privileged Account Management"},
+        {"id": "M1027", "name": "Password Policies"},
+    ]
+
+
+def test_detection_for_technique__no_filters__flags_are_null(kb_path):
+    conn = open_db_for_test(kb_path)
+    detection = queries.detection_for_technique(conn, "T1078")
+    assert detection["detection_strategy"] == {"id": "DET0001", "name": "Detect Valid Account Abuse"}
+    assert [(a["id"], a["platforms"], a["applicable"], a["detectable"]) for a in detection["analytics"]] == [
+        ("AN0001", ["Windows"], None, None),
+        ("AN0002", ["Linux"], None, None),
+    ]
+
+
+def test_detection_for_technique__platforms__marks_only_matching_analytics_applicable(kb_path):
+    conn = open_db_for_test(kb_path)
+    detection = queries.detection_for_technique(conn, "T1078", platforms=("Windows",))
+    assert {a["id"]: a["applicable"] for a in detection["analytics"]} == {"AN0001": True, "AN0002": False}
+
+
+def test_detection_for_technique__one_of_two_log_sources__is_not_detectable(kb_path):
+    # AN0001 needs Security AND Sysmon; passing only Security must come back False, which is
+    # what tells "every source" apart from "any source".
+    conn = open_db_for_test(kb_path)
+    one = queries.detection_for_technique(conn, "T1078", log_sources=("WinEventLog:Security",))
+    both = queries.detection_for_technique(conn, "T1078", log_sources=("WinEventLog:Security", "WinEventLog:Sysmon"))
+    assert {a["id"]: a["detectable"] for a in one["analytics"]} == {"AN0001": False, "AN0002": False}
+    assert {a["id"]: a["detectable"] for a in both["analytics"]} == {"AN0001": True, "AN0002": False}
+
+
+def test_detection_for_technique__an_analytic_with_no_log_sources__is_never_detectable(tmp_path, kb_path):
+    import shutil  # noqa: PLC0415
+
+    shutil.copyfile(kb_path, tmp_path / "copy.sqlite")
+    conn = sqlite3.connect(tmp_path / "copy.sqlite")
+    conn.row_factory = sqlite3.Row
+    conn.execute("DELETE FROM analytic_log_sources WHERE analytic_id = 'AN0002'")
+    conn.commit()
+    detection = queries.detection_for_technique(conn, "T1078", log_sources=("auditd:SYSCALL",))
+    conn.close()
+    assert {a["id"]: a["detectable"] for a in detection["analytics"]} == {"AN0001": False, "AN0002": False}
+
+
+def test_detection_for_technique__two_strategies_on_one_technique__answers_with_the_lowest_id(tmp_path, kb_path):
+    import shutil  # noqa: PLC0415
+
+    shutil.copyfile(kb_path, tmp_path / "copy.sqlite")
+    conn = sqlite3.connect(tmp_path / "copy.sqlite")
+    conn.row_factory = sqlite3.Row
+    conn.execute("INSERT INTO detection_strategies VALUES ('DET0000', 'T1078', 'Earlier Strategy')")
+    conn.commit()
+    detection = queries.detection_for_technique(conn, "T1078")
+    conn.close()
+    assert detection["detection_strategy"]["id"] == "DET0000"
+    assert detection["analytics"] == []
+
+
+def test_detection_for_technique__technique_without_a_strategy__returns_none(kb_path):
+    conn = open_db_for_test(kb_path)
+    assert queries.detection_for_technique(conn, "T1078.001") is None
+
+
+def test_defense_details__mixed_ids_with_a_technique__expand_each_kind(kb_path):
+    conn = open_db_for_test(kb_path)
+    details = queries.defense_details(conn, ["M1026", "DET0001", "AN0003"], technique_id="T1078")
+    (mitigation,) = details["mitigations"]
+    assert mitigation["id"] == "M1026"
+    assert mitigation["technique_count"] == 1
+    assert mitigation["technique_description"].startswith("Audit domain and local accounts")
+    (strategy,) = details["detection_strategies"]
+    assert strategy["technique_id"] == "T1078"
+    assert [a["id"] for a in strategy["analytics"]] == ["AN0001", "AN0002"]
+    assert strategy["analytics"][0]["log_sources"][0] == {
+        "name": "WinEventLog:Security",
+        "channel": "EventCode=4624",
+        "data_component": {"id": "DC0001", "name": "Logon Session Creation"},
+    }
+    assert strategy["analytics"][0]["mutable_elements"][0]["field"] == "TimeWindow"
+    (analytic,) = details["analytics"]
+    assert (analytic["id"], analytic["detection_strategy_id"]) == ("AN0003", "DET0002")
+    assert analytic["log_sources"] == [{"name": "auditd:SYSCALL", "channel": "", "data_component": None}]
+
+
+def test_defense_details__mitigation_without_a_technique__has_no_pair_text(kb_path):
+    conn = open_db_for_test(kb_path)
+    (mitigation,) = queries.defense_details(conn, ["M1027"])["mitigations"]
+    assert mitigation["technique_count"] == 2
+    assert mitigation["technique_description"] is None
+
+
+def test_defense_details__lowercase_padded_and_unknown_ids__match_case_insensitively_and_skip_the_rest(kb_path):
+    conn = open_db_for_test(kb_path)
+    details = queries.defense_details(conn, [" m1026 ", "det0001", "AN9999", "V-1"])
+    assert [m["id"] for m in details["mitigations"]] == ["M1026"]
+    assert [s["id"] for s in details["detection_strategies"]] == ["DET0001"]
+    assert details["analytics"] == []
+
+
+def test_platform_and_log_source_names__the_fixture__are_sorted_vocabularies(kb_path):
+    conn = open_db_for_test(kb_path)
+    assert queries.platform_names(conn) == ["Linux", "Windows"]
+    assert queries.log_source_names(conn) == [
+        "WinEventLog:Security",
+        "WinEventLog:Sysmon",
+        "auditd:EXECVE",
+        "auditd:SYSCALL",
+    ]
+
+
+def test_findings_for_control__any_row__names_its_catalog(kb_conn):
+    rows = queries.findings_for_control(kb_conn, "AC-2", [("TEST_STIG", "1")])
+    assert rows and all(row["catalog"] == "disa" for row in rows)
+
+
+def test_detection_for_technique__two_platforms__marks_analytics_matching_either_applicable(kb_path):
+    conn = open_db_for_test(kb_path)
+    detection = queries.detection_for_technique(conn, "T1078", platforms=("Windows", "Linux"))
+    assert {a["id"]: a["applicable"] for a in detection["analytics"]} == {"AN0001": True, "AN0002": True}
+
+
+def test_detection_for_technique__platform_that_is_a_substring_of_another__does_not_match(tmp_path, kb_path):
+    import shutil  # noqa: PLC0415
+
+    shutil.copyfile(kb_path, tmp_path / "copy.sqlite")
+    conn = sqlite3.connect(tmp_path / "copy.sqlite")
+    conn.row_factory = sqlite3.Row
+    conn.execute("UPDATE analytics SET platforms = 'Windows,Office Suite' WHERE analytic_id = 'AN0001'")
+    conn.commit()
+    partial = queries.detection_for_technique(conn, "T1078", platforms=("Office",))
+    whole = queries.detection_for_technique(conn, "T1078", platforms=("Office Suite",))
+    conn.close()
+    assert {a["id"]: a["applicable"] for a in partial["analytics"]} == {"AN0001": False, "AN0002": False}
+    assert {a["id"]: a["applicable"] for a in whole["analytics"]} == {"AN0001": True, "AN0002": False}
+
+
+def test_detection_for_technique__platforms_and_log_sources_together__flag_each_independently(kb_path):
+    conn = open_db_for_test(kb_path)
+    detection = queries.detection_for_technique(
+        conn, "T1078", platforms=("Linux",), log_sources=("WinEventLog:Security", "WinEventLog:Sysmon")
+    )
+    assert {a["id"]: (a["applicable"], a["detectable"]) for a in detection["analytics"]} == {
+        "AN0001": (False, True),
+        "AN0002": (True, False),
+    }

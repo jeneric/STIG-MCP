@@ -22,6 +22,7 @@ copy keeps inside `site-packages`. The corpus conformance harness, a developer t
 - [Build the knowledge base](#build-the-knowledge-base)
   - [1. Fetch the sources](#1-fetch-the-sources)
   - [2. Ingest](#2-ingest)
+- [ATT&CK mitigations and detections](#attck-mitigations-and-detections)
 - [Placing the sources by hand](#placing-the-sources-by-hand)
   - [The SRG-STIG Library Compilation](#the-srg-stig-library-compilation)
 - [Keeping current](#keeping-current)
@@ -90,7 +91,7 @@ release you download.
 
 1. On a connected host, open the release on <https://github.com/jeneric/STIG-MCP/releases>
    and download two of its assets: the knowledge base, named like
-   `stig_kb-schema6-2026-10-05.sqlite.xz`, and `SHA256SUMS`.
+   `stig_kb-schema7-2026-10-05.sqlite.xz`, and `SHA256SUMS`.
 2. In the directory holding both, verify the download. On Linux:
 
        sha256sum -c SHA256SUMS --ignore-missing
@@ -104,17 +105,17 @@ release you download.
    PowerShell has no checker; print the value and compare it by eye with the `.xz` line of
    `SHA256SUMS`:
 
-       (Get-FileHash .\stig_kb-schema6-2026-10-05.sqlite.xz -Algorithm SHA256).Hash.ToLower()
+       (Get-FileHash .\stig_kb-schema7-2026-10-05.sqlite.xz -Algorithm SHA256).Hash.ToLower()
 
 3. Carry both files to the host that cannot reach GitHub.
 4. Install, passing as `--sha256` the 64-character value at the start of the `SHA256SUMS`
    line for the exact file you pass, the value alone rather than the whole line:
 
-       uv run stig-mcp-install-kb --file stig_kb-schema6-2026-10-05.sqlite.xz --sha256 HEX
+       uv run stig-mcp-install-kb --file stig_kb-schema7-2026-10-05.sqlite.xz --sha256 HEX
 
 The install checks the SHA-256 itself, so step 2 catches a bad download before you carry it
 across rather than being a check the install depends on. The decompressed `.sqlite` is
-accepted too, for example after `xz -dk stig_kb-schema6-2026-10-05.sqlite.xz`; pass it with
+accepted too, for example after `xz -dk stig_kb-schema7-2026-10-05.sqlite.xz`; pass it with
 its own line's value, since `SHA256SUMS` lists both files and the value for one refuses the
 other. The agent can do the same through `install_knowledge_base(path=..., sha256=...)`, with
 a path on the machine the server runs on. A file install records the file name rather than a
@@ -198,12 +199,42 @@ the build. When a benchmark ships in multiple versions, only the newest is kept.
 The summary reports both `stig_files` (documents that classified as a STIG and parsed) and
 `stigs` (unique benchmarks that survived selection).
 
+The summary also counts `mitigations`, `detection_strategies`, `analytics` and
+`analytic_log_sources` from the ATT&CK bundle (44, 697, 1,745 and 4,160 for ATT&CK 19.2).
+The ingest refuses a bundle that yields zero live mitigations, or zero detection strategies
+joined to a technique by a `detects` relationship, and names the count: that is what a
+change to ATT&CK's data model looks like, and an unattended build must stop rather than
+publish empty tables. A spec version whose major is not 3 only warns.
+
 The knowledge base carries a schema version. The server starts against a knowledge base
 built by an older release, but never answers from it: it reports the outdated schema and
 tells you to re-run the ingest. Rebuilding is always the recovery: the knowledge base is
-derived entirely from the sources above. The current schema is `6`. Schema 6 records every
+derived entirely from the sources above. The current schema is `7`. Schema 7 adds ATT&CK's mitigations and detection strategies
+(see "ATT&CK mitigations and detections" below); schema 6 began recording every
 input file with its SHA-256 in `source_files`, and carries this project's license files in
 `notices`, so the notices travel with any copy of the knowledge base.
+
+## ATT&CK mitigations and detections
+
+Schema 7 holds ATT&CK's defensive objects in six tables, all read from the same
+`enterprise-attack.json` as the techniques:
+
+- **`mitigations`**: course-of-action objects by M-id, with name and description.
+- **`technique_mitigation`**: which mitigation applies to which technique, with MITRE's text
+  about that pairing.
+- **`detection_strategies`**: one row per DET-id, joined to its technique by a `detects`
+  relationship.
+- **`analytics`**: each AN-id with its strategy, platforms and mutable elements.
+- **`analytic_log_sources`**: each log source an analytic names, with its channel and data
+  component. Names and channels are stored with surrounding whitespace stripped, because
+  callers' `log_sources` are stripped before matching; ATT&CK 19.2 ships
+  `firmware:integrity ` and `networkconfig ` with a trailing space.
+- **`data_components`**: DC-ids with name and description.
+
+`ingest_meta` carries a row named `attack_spec_version` recording the bundle's
+`x_mitre_attack_spec_version`, which is what to read first when a new ATT&CK release
+changes the shape of these objects. How the server answers from these tables is in the
+user guide's "Protect and Detect" section ([docs/user-guide.md](user-guide.md)).
 
 ## Placing the sources by hand
 
@@ -830,7 +861,7 @@ duplicates are different: a requirement really is lost from the store, and the f
 change in this project rather than anything to do during a refresh. **It would not change any
 answer today**, because neither benchmark's rules carry the CCI idents a control query joins
 through: `SAN` has 0 of 28 and `MULTI-FUNCTION_DEVICE` 1 of 22, so neither the
-surviving occurrence nor the dropped one is reachable by `mitigations_for_technique`. Separating
+surviving occurrence nor the dropped one is reachable by `defenses_for_technique`. Separating
 them is also not just a wider key: `rule_cci.rule_id` is a foreign key onto `stig_rules(rule_id)`
 and would have to move with it. The step in "Quarterly refresh" exists so that a
 short answer to a scoped query is explicable.

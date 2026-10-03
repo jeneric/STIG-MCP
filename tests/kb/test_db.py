@@ -62,7 +62,7 @@ def test_create_db__fresh_path__revoked_technique_requires_a_live_replacement(tm
 
 
 def test_create_db__stigs_table__carries_the_provenance_columns(tmp_path):
-    assert SCHEMA_VERSION == "6"
+    assert SCHEMA_VERSION == "7"
     conn = create_db(tmp_path / "kb.sqlite")
     columns = {r[1] for r in conn.execute("PRAGMA table_info(stigs)")}
     assert {

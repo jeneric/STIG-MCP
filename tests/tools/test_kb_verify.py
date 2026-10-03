@@ -150,6 +150,10 @@ def test_golden_failures__the_fixture__passes_rhel_and_names_what_it_lacks(kb_pa
     failures = kb_verify.golden_failures(copy)
     assert not any(f.startswith("RHEL 9") for f in failures)
     assert any(f.startswith("T1078 on Windows 11") for f in failures)
+    assert not any(f.startswith("T1078 defenses") for f in failures)
+    # the fixture holds DET0001, not DET0103, so the tool's own refusal is the failure text
+    refusal = "No mitigation, detection strategy or analytic in this knowledge base has the id 'DET0103'"
+    assert any(f.startswith("DET0103 details") and refusal in f for f in failures)
 
 
 def test_golden_failures__a_check_the_tools_refuse__is_a_named_failure_not_a_crash(kb_path, tmp_path):
@@ -248,7 +252,45 @@ def test_verify__a_clean_build_against_its_own_index__returns_the_tripwire_with_
     ],
 )
 def test_windows_11_check__findings_and_their_details__decide_the_result(monkeypatch, findings, fix_text, expected):
-    answer = {"resolved_systems": [{"stig_id": "Microsoft_Windows_11_STIG"}], "findings": findings}
-    monkeypatch.setattr(kb_verify.tools, "mitigations_for_technique", lambda kb, *a, **k: answer)
+    answer = {"resolved_systems": [{"stig_id": "Microsoft_Windows_11_STIG"}], "protect": {"findings": findings}}
+    monkeypatch.setattr(kb_verify.tools, "defenses_for_technique", lambda kb, *a, **k: answer)
     monkeypatch.setattr(kb_verify.tools, "finding_details", lambda kb, ids: {"findings": [{"fix_text": fix_text}]})
     assert kb_verify._windows_11(object()) == expected
+
+
+@pytest.mark.parametrize(
+    ("mitigations", "detect", "expected"),
+    [
+        ([{"id": "M1026"}], {"detection_strategy": {"id": "DET0001"}}, None),
+        ([], {"detection_strategy": {"id": "DET0001"}}, "no ATT&CK mitigation on T1078"),
+        ([{"id": "M1026"}], None, "no detection strategy on T1078"),
+    ],
+)
+def test_t1078_defenses_check__mitigations_and_strategy__decide_the_result(monkeypatch, mitigations, detect, expected):
+    monkeypatch.setattr(
+        kb_verify.tools,
+        "defenses_for_technique",
+        lambda kb, tid: {"protect": {"mitigations": mitigations}, "detect": detect},
+    )
+    assert kb_verify._t1078_defenses(object()) == expected
+
+
+_NO_LOG_SOURCE = "DET0103 has no analytic with a log source"
+
+
+@pytest.mark.parametrize(
+    ("strategies", "expected"),
+    [
+        ([{"analytics": [{"log_sources": []}, {"log_sources": [{"name": "auditd"}]}]}], None),
+        ([{"analytics": [{"log_sources": []}, {"log_sources": []}]}], _NO_LOG_SOURCE),
+        ([{"analytics": []}], _NO_LOG_SOURCE),
+        ([], _NO_LOG_SOURCE),
+    ],
+)
+def test_det0103_check__analytics_and_log_sources__decide_the_result(monkeypatch, strategies, expected):
+    monkeypatch.setattr(
+        kb_verify.tools,
+        "defense_details",
+        lambda kb, ids, technique_id=None: {"detection_strategies": strategies},
+    )
+    assert kb_verify._det0103(object()) == expected

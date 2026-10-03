@@ -103,59 +103,96 @@ def _compact(result):
 # single thread, so every call reaches that connection from the same thread.
 def _register_answer_tools(server, kb):
     @server.tool()
-    async def mitigations_for_technique(
+    async def defenses_for_technique(  # noqa: PLR0913
         technique_id: str,
         system_description: str | None = None,
-        stig_ids: list[str] | None = None,
+        benchmark_ids: list[str] | None = None,
         severity: list[str] | None = None,
+        platforms: list[str] | None = None,
+        log_sources: list[str] | None = None,
     ) -> TextContent:
-        """Return 800-53r5 controls and the DISA STIG findings that mitigate an ATT&CK
-        technique. The answer opens with summary: rules found, rules per CAT, control_counts
-        (how many controls map and how many have rules), cat_i (the CAT I V- ids with their
-        count) and controls_with_rules. Use those counts rather than counting lists
-        yourself. Then each control lists the rule ids of its findings, and findings lists
-        each finding once. Findings carry no check or fix text: call finding_details with
-        their rule ids or V- ids for DISA's exact steps. severity narrows findings to CAT
-        levels, e.g. ["I"]. A technique id ATT&CK has revoked (e.g. T1562) is answered for
-        its replacement, and the response reports the redirect in technique.redirected_from.
-        Include the product build in system_description where one exists
-        (e.g. 'ESXi 8.0 U3'): some products ship two STIG versions with different
-        remediations, and the build selects the one that applies. stig_ids narrows to
-        benchmarks you already know and accepts at most 200; to scope a system you cannot
-        name, pass system_description instead and let the resolver do it. If the knowledge base is not built yet this
-        returns {"status": "not_ready"} with the commands to run, rather than an error."""
+        """Return the defenses the knowledge base holds for an ATT&CK technique: the 800-53r5 controls CTID
+        maps to it, the DISA STIG findings that implement those controls on the systems you name, and
+        ATT&CK's own mitigations and detection strategy. The answer opens with summary: rules found, rules
+        per CAT, control_counts, cat_i (the CAT I V- ids with their count), then mitigation and detection
+        counts (detection counts analytics), then controls_with_rules. Use those counts rather than counting
+        lists yourself. Findings carry no check or fix text: call finding_details with their rule ids or V-
+        ids for DISA's exact steps. severity narrows findings to CAT levels, e.g. ["I"]. A technique id
+        ATT&CK has revoked (e.g. T1562) is answered for its replacement, and the response reports the
+        redirect in technique.redirected_from. Include the product build in system_description where one
+        exists (e.g. 'ESXi 8.0 U3'): some products ship two STIG versions with different remediations, and
+        the build selects the one that applies. benchmark_ids narrows to benchmarks you already know and
+        accepts at most 200; to scope a system you cannot name, pass system_description instead and let the
+        resolver do it. If the knowledge base is not built yet this returns {"status": "not_ready"} with the
+        commands to run, rather than an error. platforms marks each detection analytic applicable or not for
+        the ATT&CK platforms you name, e.g. ["Windows"]; an unknown name is refused with the full list.
+        log_sources names the telemetry you collect, with ATT&CK's log source names exactly (e.g.
+        ["WinEventLog:Security", "WinEventLog:Sysmon"]); log_sources takes up to 100 names. Each analytic is
+        then marked detectable only when every log source it needs is in the list. The answer lists
+        mitigations and analytics by id and name only: call defense_details with M-, DET- or AN- ids for
+        MITRE's text, log sources and tunable elements."""
         with _guidance_reaches_the_caller():
-            return _compact(tools.mitigations_for_technique(kb, technique_id, system_description, stig_ids, severity))
+            return _compact(
+                tools.defenses_for_technique(
+                    kb,
+                    technique_id,
+                    system_description=system_description,
+                    benchmark_ids=benchmark_ids,
+                    severity=severity,
+                    platforms=platforms,
+                    log_sources=log_sources,
+                )
+            )
 
 
 def _register_actor_tool(server, kb):
     @server.tool()
-    async def techniques_for_actor(
+    async def techniques_for_actor(  # noqa: PLR0913
         actor: str,
         system_description: str | None = None,
-        stig_ids: list[str] | None = None,
-        include_mitigations: bool = False,
+        benchmark_ids: list[str] | None = None,
+        include_defenses: bool = False,
         severity: list[str] | None = None,
+        platforms: list[str] | None = None,
+        log_sources: list[str] | None = None,
     ) -> TextContent:
-        """List an ATT&CK actor's techniques, optionally expanded with mitigations for given
-        systems. actor is an ATT&CK group id, name or alias; case, spacing, punctuation and
-        a trailing "Group" or "Team" are ignored, and actor.matched_as then names what
-        matched. actor.also_matches, when present, lists other groups the same label loosely
-        names. A misspelling is not corrected: the error names the closest groups, so call
-        again with the group id of the one meant. The answer opens with summary, which
-        counts the techniques; with include_mitigations it adds the same counts
-        mitigations_for_technique gives, across every technique. Use those counts rather
-        than counting lists yourself. controls lists each control once with its rule ids,
-        and findings lists each finding once, without check or fix text (call
-        finding_details for those). Each technique lists its control ids grouped by where
-        the mapping came from ("ctid" or "override"). stig_ids accepts at most 200; it and
-        severity (CAT levels, e.g. ["I"]) are validated always but only take effect with
-        include_mitigations. To scope a system you cannot name, pass system_description
-        instead. If the knowledge base is not built yet this returns {"status": "not_ready"}
+        """List an ATT&CK actor's techniques, optionally expanded with defenses for given systems. actor is an
+        ATT&CK group id, name or alias; case, spacing, punctuation and a trailing "Group" or "Team" are
+        ignored, and actor.matched_as then names what matched. actor.also_matches, when present, lists other
+        groups the same label loosely names. A misspelling is not corrected: the error names the closest
+        groups, so call again with the group id of the one meant. The answer opens with summary, which
+        counts the techniques; with include_defenses it adds the same counts defenses_for_technique gives,
+        across every technique. Use those counts rather than counting lists yourself. controls lists each
+        control once with its rule ids, and findings lists each finding once, without check or fix text
+        (call finding_details for those). Each technique lists its control ids grouped by where the mapping
+        came from ("ctid" or "override"). benchmark_ids accepts at most 200; it, severity (CAT levels, e.g.
+        ["I"]), platforms and log_sources are validated always but only take effect with include_defenses.
+        To scope a system you cannot name, pass system_description instead. With include_defenses each
+        technique also lists its ATT&CK mitigations (M-ids), its detection strategy (DET-id), analytics
+        (AN-ids) with platforms, and gaps, which names the coverage classes that technique falls in, so read
+        gaps rather than deriving them. mitigations maps each M-id to its name once, while
+        summary.mitigations counts mitigation references across techniques (one on two techniques counts
+        twice). summary.coverage, which comes first after cat_i, counts techniques: without_mitigation,
+        mitigated_without_rules (only when a system was scoped; with severity, no rules at the requested CAT
+        levels), without_applicable_analytic (only with platforms), detectable and undetectable (only with
+        log_sources); summary.detection counts analytics instead. Detection is judged applicability first
+        when platforms is given, then detectability over the applicable analytics. platforms marks each
+        analytic applicable or not, and log_sources marks it detectable or not, as in
+        defenses_for_technique; log_sources takes up to 100 names. Call defense_details with M-, DET- or AN-
+        ids for MITRE's text. If the knowledge base is not built yet this returns {"status": "not_ready"}
         with the commands to run, rather than an error."""
         with _guidance_reaches_the_caller():
             return _compact(
-                tools.techniques_for_actor(kb, actor, system_description, stig_ids, include_mitigations, severity)
+                tools.techniques_for_actor(
+                    kb,
+                    actor,
+                    system_description=system_description,
+                    benchmark_ids=benchmark_ids,
+                    include_defenses=include_defenses,
+                    severity=severity,
+                    platforms=platforms,
+                    log_sources=log_sources,
+                )
             )
 
 
@@ -164,7 +201,7 @@ def _register_detail_tool(server, kb):
     async def finding_details(ids: list[str]) -> TextContent:
         """Return DISA's check and fix text for STIG findings, with each finding's benchmark,
         release and CCIs. ids takes up to 50 rule ids (SV-...r..._rule) or V- ids as listed
-        under findings in a mitigations_for_technique or techniques_for_actor answer, in any
+        under findings in a defenses_for_technique or techniques_for_actor answer, in any
         case. Prefer the V- id: a rule id carries its release's revision and matches only that
         release. A V- id that two benchmarks or majors share returns every match, each labeled
         with its benchmark. not_found lists ids that matched nothing; if none match, the call
@@ -174,6 +211,26 @@ def _register_detail_tool(server, kb):
         commands to run, rather than an error."""
         with _guidance_reaches_the_caller():
             return _compact(tools.finding_details(kb, ids))
+
+    @server.tool()
+    async def defense_details(ids: list[str], technique_id: str | None = None) -> TextContent:
+        """Return MITRE's text for ATT&CK defenses named by id: mitigations (M1026), detection
+        strategies (DET0103) and analytics (AN0286), as listed under protect.mitigations and
+        detect in a defenses_for_technique answer or under each technique in a
+        techniques_for_actor answer. ids takes up to 10 per call, matched case-insensitively. A mitigation returns its
+        description and how many techniques it covers; with technique_id it also returns
+        MITRE's text about that mitigation on that technique as technique_description, which is
+        null when that mitigation is not paired with that technique (a revoked id answers for
+        its replacement, reported in technique.redirected_from). A detection strategy returns every
+        analytic in full: description, platforms, log_sources (name, channel and data component)
+        and mutable_elements, the tunables a detection engineer sets. An analytic id returns
+        that analytic alone. Analytics say what to collect, not how to enable it: the enabling
+        steps are in the vendor's documentation. not_found lists ids that matched nothing; if
+        none match, the call is refused. Quote MITRE's text as written and label anything you
+        add as your own. If the knowledge base is not built yet this returns
+        {"status": "not_ready"} with the commands to run, rather than an error."""
+        with _guidance_reaches_the_caller():
+            return _compact(tools.defense_details(kb=kb, ids=ids, technique_id=technique_id))
 
 
 def _register_resolver_tool(server, kb):

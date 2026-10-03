@@ -103,9 +103,9 @@ def test_readme__fetch_list__lists_exactly_the_hosts_the_package_contacts():
     assert listed == _hosts(ROOT / "stig_mcp") | set(releases.ASSET_REDIRECT_HOSTS)
 
 
-def test_readme__example_prompts__are_exactly_three():
+def test_readme__example_prompts__are_exactly_four():
     body = _section(README.read_text(), "Example prompts")
-    assert len(re.findall(r"^\d+\. ", body, re.M)) == 3
+    assert len(re.findall(r"^\d+\. ", body, re.M)) == 4
 
 
 def test_docs__relative_links__resolve():
@@ -473,3 +473,45 @@ def test_install__organization_allowlist__quotes_the_message_vs_code_shows():
 def test_install__proxy_timeout__names_the_uv_setting():
     body = _section(INSTALL.read_text(), "Downloads time out behind a proxy")
     assert "`UV_HTTP_TIMEOUT`" in body
+
+
+_DEFENSES_HEADING = "Protect and Detect: ATT&CK mitigations and detections"
+
+
+def test_user_guide__defense_details_bound__matches_the_code():
+    body = _section(GUIDE.read_text(), _DEFENSES_HEADING)
+    match = re.search(r"`defense_details` takes up to (\d+) ids", body)
+    assert match and int(match.group(1)) == tools._MAX_DEFENSE_IDS
+
+
+def test_user_guide__log_sources_bound__matches_the_code():
+    body = _section(GUIDE.read_text(), _DEFENSES_HEADING)
+    # "up to", not "at most": test_app's benchmark_ids guard reads every "at most N" in the guide.
+    match = re.search(r"`log_sources` takes up to (\d+) names", body)
+    assert match and int(match.group(1)) == tools._MAX_LOG_SOURCES
+
+
+def test_user_guide__coverage_keys__match_a_real_answer(defenses_kb):
+    body = _section(GUIDE.read_text(), _DEFENSES_HEADING)
+    documented = set(re.findall(r"^- `([a-z_]+)`:", body, re.M))
+    kb = app_module.KnowledgeBase(defenses_kb)
+    result = tools.techniques_for_actor(
+        kb,
+        "APT29",
+        system_description="RHEL 9",
+        include_defenses=True,
+        platforms=["Windows"],
+        log_sources=["WinEventLog:Security"],
+    )
+    assert set(result["summary"]["coverage"]) == documented
+
+
+def test_descriptions__every_manifest__names_mitigations_and_detections():
+    for path in (
+        ROOT / "server.json",
+        ROOT / "plugins" / "stig-mcp" / ".claude-plugin" / "plugin.json",
+        ROOT / ".claude-plugin" / "marketplace.json",
+    ):
+        text = path.read_text()
+        assert "mitigations" in text and "detections" in text, path
+    assert "detections" in (ROOT / "plugins" / "stig-mcp" / "README.md").read_text()

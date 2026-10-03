@@ -75,13 +75,13 @@ def tripwire(conn, index_names):
 
 
 def _windows_11(kb):
-    result = tools.mitigations_for_technique(kb, "T1078", system_description="Windows 11")
+    result = tools.defenses_for_technique(kb, "T1078", system_description="Windows 11")
     systems = {row["stig_id"] for row in result.get("resolved_systems", [])}
     if "Microsoft_Windows_11_STIG" not in systems:
         return f"resolved {sorted(systems)}, not Microsoft_Windows_11_STIG"
-    if not result["findings"]:
+    if not result["protect"]["findings"]:
         return "no STIG findings under any control"
-    details = tools.finding_details(kb, list(result["findings"])[:1])
+    details = tools.finding_details(kb, list(result["protect"]["findings"])[:1])
     return None if details["findings"][0]["fix_text"] else "finding_details returned no fix text"
 
 
@@ -95,11 +95,32 @@ def _rhel_9(kb):
     return None if top == "RHEL_9_STIG" else f"top candidate is {top}"
 
 
+def _t1078_defenses(kb):
+    result = tools.defenses_for_technique(kb, "T1078")
+    if not result["protect"]["mitigations"]:
+        return "no ATT&CK mitigation on T1078"
+    if not result["detect"]:
+        return "no detection strategy on T1078"
+    return None
+
+
+def _det0103(kb):
+    """DET0103 is a real 19.x strategy; the check that its analytics carry log sources is what
+    catches a bundle whose detection objects parsed but came through hollow."""
+    details = tools.defense_details(kb, ["DET0103"])
+    analytics = details["detection_strategies"][0]["analytics"] if details["detection_strategies"] else []
+    if not any(a["log_sources"] for a in analytics):
+        return "DET0103 has no analytic with a log source"
+    return None
+
+
 # Each drives a different server tool end to end against the built knowledge base.
 GOLDEN = (
     Golden("T1078 on Windows 11", _windows_11),
     Golden("APT29's techniques", _apt29),
     Golden("RHEL 9", _rhel_9),
+    Golden("T1078 defenses", _t1078_defenses),
+    Golden("DET0103 details", _det0103),
 )
 
 
