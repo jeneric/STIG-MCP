@@ -83,14 +83,15 @@ get MITRE's text about a mitigation on that particular technique, as
 Two optional filters mark up the Detect side; neither removes an analytic from the answer.
 `platforms` lists ATT&CK platform names (`["Windows"]`); each analytic is then marked
 `applicable` or not, and an unknown name is refused with the full list. `log_sources`
-lists the telemetry you collect, using ATT&CK's log source names exactly as
-`defense_details` prints them; `log_sources` takes up to 100 names, and an unknown one is
-refused naming the closest matches. An analytic is `detectable` only when every log source
-it needs is in your list; one that names no log source at all is never detectable.
-Channels are not compared: naming a log asserts you collect it, and the analytic's channel
-says which events within it matter. `summary` counts the mitigations and the analytics
-before `cat_i`, with how many are applicable and detectable when you passed the matching
-filter.
+lists the telemetry you collect, using ATT&CK's log source names as `defense_details`
+prints them; `log_sources` takes up to 100 names, and an unknown one is refused naming the
+closest matches. Case is ignored, because ATT&CK 19.2 spells four names two ways
+(`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling matches both. An
+analytic is `detectable` only when every log source it needs is in your list; one that
+names no log source at all is never detectable. Channels are not compared: naming a log
+asserts you collect it, and the analytic's channel says which events within it matter.
+`summary` counts the mitigations and the analytics before `cat_i`, with how many are
+applicable and detectable when you passed the matching filter.
 
 With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, a
 top-level `mitigations` map naming each M-id once, and a `coverage` block to `summary`,

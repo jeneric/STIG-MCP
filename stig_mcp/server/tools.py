@@ -395,7 +395,8 @@ def _check_log_sources(conn, log_sources):
             f"sources your telemetry actually collects; a list this long is not a telemetry inventory."
         )
     known = queries.log_source_names(conn)
-    unknown = [source for source in wanted if source not in known]
+    spellings = _spellings_by_key(known)
+    unknown = [source for source in wanted if source.casefold() not in spellings]
     if unknown:
         hints = []
         for source in unknown:
@@ -403,9 +404,18 @@ def _check_log_sources(conn, log_sources):
             hints.append(f"'{source}' (closest: {', '.join(closest)})")
         raise CallerError(
             f"log_sources names sources ATT&CK does not use: {'; '.join(hints)}. Pass ATT&CK's log "
-            f"source names exactly as defense_details lists them under log_sources."
+            f"source names as defense_details lists them under log_sources; case is ignored."
         )
-    return wanted
+    return list(dict.fromkeys(name for source in wanted for name in spellings[source.casefold()]))
+
+
+def _spellings_by_key(names):
+    """ATT&CK spells some names two ways (macos:unifiedlog, macOS:unifiedlog), so a caller's
+    name stands for every stored spelling that differs from it only in case."""
+    spellings = {}
+    for name in names:
+        spellings.setdefault(name.casefold(), []).append(name)
+    return spellings
 
 
 def _resolve_scope(conn, system_description, benchmark_ids):

@@ -1791,6 +1791,42 @@ def test_techniques_for_actor__include_defenses__counts_every_coverage_class_dis
     assert result["summary"]["detection"] == {"analytics": 10, "applicable": 7, "detectable": 2}
 
 
+@pytest.fixture
+def minority_spelling_kb(defenses_kb, tmp_path):
+    """defenses_kb with AN0004 (T9001) needing 'WinEventLog:security', as ATT&CK 19.2 spells
+    four names two ways; AN0001 keeps 'WinEventLog:Security'."""
+    target = tmp_path / "kb.sqlite"
+    shutil.copyfile(defenses_kb, target)
+    with closing(sqlite3.connect(target)) as conn, conn:
+        changed = conn.execute(
+            "UPDATE analytic_log_sources SET name = 'WinEventLog:security' "
+            "WHERE analytic_id = 'AN0004' AND name = 'WinEventLog:Security'"
+        ).rowcount
+    assert changed == 1
+    return app_module.KnowledgeBase(target)
+
+
+def test_defenses_for_technique__log_source_spelled_another_case_in_attack__matches_it(minority_spelling_kb):
+    result = tools.defenses_for_technique(minority_spelling_kb, "T9001", log_sources=["WinEventLog:Security"])
+    assert [(a["id"], a["detectable"]) for a in result["detect"]["analytics"]] == [("AN0004", True)]
+
+
+def test_techniques_for_actor__one_spelling_of_a_log_source__matches_both_spellings(minority_spelling_kb):
+    result = tools.techniques_for_actor(
+        minority_spelling_kb, "APT29", include_defenses=True, log_sources=["WinEventLog:Security"]
+    )
+    by_id = {t["technique_id"]: t for t in result["techniques"]}
+    assert by_id["T9001"]["analytics"][0]["detectable"] is True
+    assert "undetectable" not in by_id["T9001"]["gaps"]
+
+
+def test_defenses_for_technique__log_source_in_a_case_attack_never_uses__is_accepted_and_matches(defenses_kb):
+    kb = app_module.KnowledgeBase(defenses_kb)
+    result = tools.defenses_for_technique(kb, "T1078", log_sources=["WINEVENTLOG:SECURITY", "wineventlog:sysmon"])
+    flagged = {a["id"]: a["detectable"] for a in result["detect"]["analytics"]}
+    assert flagged["AN0001"] is True
+
+
 def test_techniques_for_actor__include_defenses_without_log_sources__judges_no_technique_undetectable(defenses_kb):
     with_telemetry = _apt29_coverage(defenses_kb, log_sources=_TELEMETRY)
     undetectable = [t["technique_id"] for t in with_telemetry["techniques"] if "undetectable" in t["gaps"]]

@@ -128,7 +128,7 @@ def _register_answer_tools(server, kb):
         do it. If the knowledge base is not built yet this returns {"status": "not_ready"} with the commands
         to run, rather than an error. platforms marks each detection analytic applicable or not for the ATT&CK
         platforms you name, e.g. ["Windows"]; an unknown name is refused with the full list. log_sources names
-        the telemetry you collect, with ATT&CK's log source names exactly (e.g. ["WinEventLog:Security",
+        the telemetry you collect, with ATT&CK's log source names, in any case (e.g. ["WinEventLog:Security",
         "WinEventLog:Sysmon"]); log_sources takes up to 100 names. Each analytic is then marked detectable
         only when every log source it needs is in the list. The answer lists mitigations and analytics by id
         and name only: call defense_details with M-, DET- or AN- ids for MITRE's text, log sources and tunable
