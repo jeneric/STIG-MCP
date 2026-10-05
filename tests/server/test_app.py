@@ -661,8 +661,8 @@ def test_build_server__defenses_for_technique_tool__forwards_platforms_and_log_s
             "log_sources": ["WinEventLog:Security", "WinEventLog:Sysmon"],
         },
     )
-    flagged = {a["id"]: (a["applicable"], a["detectable"]) for a in payload["detect"]["analytics"]}
-    assert flagged["AN0001"] == (True, True)
+    assert "AN0001" in payload["detect"]["applicable"]
+    assert "AN0001" in payload["detect"]["detectable"]
 
 
 def test_build_server__techniques_for_actor_tool__forwards_platforms_and_log_sources(defenses_kb):

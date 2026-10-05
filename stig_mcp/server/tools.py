@@ -705,12 +705,23 @@ def defenses_for_technique(  # noqa: PLR0913
     mitigations = queries.mitigations_for_technique(conn, technique["id"])
     detection = queries.detection_for_technique(conn, technique["id"], platforms, log_sources)
     counts = _defense_counts(mitigations, detection, platforms, log_sources)
+    detect = None
+    if detection:
+        detect = {
+            "detection_strategy": detection["detection_strategy"],
+            **_listed_analytics(
+                detection["analytics"],
+                platforms,
+                log_sources,
+                lambda analytic: {"name": analytic["name"], "platforms": analytic["platforms"]},
+            ),
+        }
     return {
         "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts),
         "technique": technique,
         "resolved_systems": _with_catalog(resolved_systems),
         "protect": {"controls": controls, "findings": _listed_findings(findings), "mitigations": mitigations},
-        "detect": detection,
+        "detect": detect,
         "notes": notes + scope_notes + technique_notes,
         "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},
     }
@@ -893,6 +904,17 @@ def _coverage(rows, scoped, platforms, log_sources):
     return coverage
 
 
+def _listed_analytics(analytics, platforms, log_sources, entry):
+    """A list is present only when its filter was given: absent means not judged, empty means
+    none qualify."""
+    listed = {"analytics": {analytic["id"]: entry(analytic) for analytic in analytics}}
+    if platforms:
+        listed["applicable"] = [analytic["id"] for analytic in analytics if analytic["applicable"]]
+    if log_sources:
+        listed["detectable"] = [analytic["id"] for analytic in analytics if analytic["detectable"]]
+    return listed
+
+
 def _attach_defenses(conn, technique, platforms, log_sources, mitigation_names):
     """Adds the id-only defense fields to one technique; returns its detection block."""
     mitigations = queries.mitigations_for_technique(conn, technique["technique_id"])
@@ -901,10 +923,11 @@ def _attach_defenses(conn, technique, platforms, log_sources, mitigation_names):
     technique["mitigations"] = [m["id"] for m in mitigations]
     detection = queries.detection_for_technique(conn, technique["technique_id"], platforms, log_sources)
     technique["detection_strategy"] = detection["detection_strategy"]["id"] if detection else None
-    technique["analytics"] = [
-        {key: analytic[key] for key in ("id", "platforms", "applicable", "detectable")}
-        for analytic in (detection["analytics"] if detection else [])
-    ]
+    technique.update(
+        _listed_analytics(
+            detection["analytics"] if detection else [], platforms, log_sources, lambda analytic: analytic["platforms"]
+        )
+    )
     return detection
 
 

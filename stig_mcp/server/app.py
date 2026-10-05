@@ -131,8 +131,10 @@ def _register_answer_tools(server, kb):
         platforms you name, e.g. ["Windows"]; an unknown name is refused with the full list. log_sources names
         the telemetry you collect, with ATT&CK's log source names, in any case (e.g. ["WinEventLog:Security",
         "WinEventLog:Sysmon"]); log_sources takes up to 100 names. Each analytic is then marked detectable
-        only when every log source it needs is in the list. The answer lists mitigations and analytics by id
-        and name only: call defense_details with M-, DET- or AN- ids for MITRE's text, log sources and tunable
+        only when every log source it needs is in the list. detect.analytics maps each analytic id to its name
+        and platforms; detect.applicable and detect.detectable list the qualifying ids and are present only when
+        platforms or log_sources was given (absent: not judged; empty: none qualify). Mitigations are listed by
+        id and name only: call defense_details with M-, DET- or AN- ids for MITRE's text, log sources and tunable
         elements."""
         with _guidance_reaches_the_caller():
             return _compact(
@@ -168,15 +170,15 @@ def _register_actor_tool(server, kb):
         every technique. Use those counts rather than counting lists yourself. controls lists each control
         once with its rule ids, including rules DISA tags to its enhancements, which via names, and findings
         lists each finding once, without check or fix text (call finding_details for those), each naming its
-        benchmark, V- id, CAT and title. Each technique
-        lists its control ids grouped by where the mapping came from ("ctid" or "override"). benchmark_ids
-        accepts at most 200; it, severity (CAT levels, e.g. ["I"]), platforms and log_sources are validated
-        always but only take effect with include_defenses. To scope a system you cannot name, pass
-        system_description instead. With include_defenses each technique also lists its ATT&CK mitigations
-        (M-ids), its detection strategy (DET-id), analytics (AN-ids) with platforms, and gaps, the coverage
-        classes the call can judge that count that technique as a gap (mitigated_without_rules needs a scoped
-        system, without_applicable_analytic platforms, undetectable log_sources), so read gaps rather than
-        deriving them. mitigations maps each M-id to its name once, while summary.mitigations counts
+        benchmark, V- id, CAT and title. Each technique lists its control ids grouped by where the mapping
+        came from ("ctid" or "override"). benchmark_ids accepts at most 200; it, severity (CAT levels, e.g.
+        ["I"]), platforms and log_sources are validated always but only take effect with include_defenses. To
+        scope a system you cannot name, pass system_description instead. With include_defenses each technique
+        also lists its ATT&CK mitigations (M-ids), its detection strategy (DET-id), analytics (a map of AN-id
+        to platforms, with applicable and detectable id lists as in defenses_for_technique), and gaps, the
+        coverage classes the call can judge that count that technique as a gap (mitigated_without_rules needs
+        a scoped system, without_applicable_analytic platforms, undetectable log_sources), so read gaps rather
+        than deriving them. mitigations maps each M-id to its name once, while summary.mitigations counts
         mitigation references across techniques (one on two techniques counts twice). summary.coverage, which
         comes right after control_counts, counts techniques: without_mitigation, mitigated_without_rules (only
         when a system was scoped; with severity, no rules at the requested CAT levels),

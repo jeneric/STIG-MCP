@@ -64,36 +64,39 @@ knowledge base.
 
 ## Protect and Detect: ATT&CK mitigations and detections
 
-Every `defenses_for_technique` answer has two sections named for the NIST CSF 2.0 functions
-they serve. `protect` holds the 800-53r5 `controls` CTID maps to the technique, the STIG
-`findings` that implement them on the system you named, and ATT&CK's own `mitigations`
-(`M1026 Privileged Account Management`). `detect` holds the technique's
-`detection_strategy` (`DET0560` for T1078) and its `analytics` (`AN1543` to `AN1547`), each
-with the platforms it applies to; it is null for a technique ATT&CK gives no detection
-strategy. The answer carries ids and names only; `defense_details` takes up to 10 ids of
-any of those three kinds and returns MITRE's text: a mitigation's description and how many
-techniques it covers, and for each analytic its description, platforms, `log_sources` and
-`mutable_elements`, the settings a detection engineer tunes. Each log source gives the log
-name (such as `WinEventLog:Security`), its channel (such as `EventCode=4624`) and the
-`data_component` it records, by id and name, or null when ATT&CK names no component the
-bundle defines. Pass `technique_id` to `defense_details` to
-get MITRE's text about a mitigation on that particular technique, as
+Every `defenses_for_technique` answer has two sections named for the NIST CSF 2.0
+functions they serve. `protect` holds the 800-53r5 `controls` CTID maps to the technique,
+the STIG `findings` that implement them on the system you named, and ATT&CK's own
+`mitigations` (`M1026 Privileged Account Management`). `detect` holds the technique's
+`detection_strategy` (`DET0560` for T1078) and its `analytics` (`AN1543` to `AN1547`), a
+map from each id to its name and platforms; it is null for a technique ATT&CK gives no
+detection strategy. The answer carries ids and names only;
+`defense_details` takes up to 10 ids of any of those three kinds and returns MITRE's text:
+a mitigation's description and how many techniques it covers, and for each analytic its
+description, platforms, `log_sources` and `mutable_elements`, the settings a detection
+engineer tunes. Each log source gives the log name (such as `WinEventLog:Security`), its
+channel (such as `EventCode=4624`) and the `data_component` it records, by id and name, or
+null when ATT&CK names no component the bundle defines. Pass `technique_id` to
+`defense_details` to get MITRE's text about a mitigation on that particular technique, as
 `technique_description`.
 
 Two optional filters mark up the Detect side; neither removes an analytic from the answer.
-`platforms` lists ATT&CK platform names in any case (`["Windows"]`); each analytic is then
-marked `applicable` or not, and an unknown name is refused with the full list.
-`log_sources` lists the telemetry you collect, using ATT&CK's log source names as
-`defense_details` prints them; `log_sources` takes up to 100 names, and an unknown one is
-refused naming the closest matches. Case is ignored, because ATT&CK 19.2 spells four names
-two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling matches
-both. An analytic is `detectable` only when every log source it needs is in your list; one
+`platforms` lists ATT&CK platform names in any case (`["Windows"]`); `detect.applicable`
+then lists the ids of the analytics that apply, and an unknown name is refused with the
+full list. `log_sources` lists the telemetry you collect, using ATT&CK's log source names
+as `defense_details` prints them; `log_sources` takes up to 100 names, and an unknown one
+is refused naming the closest matches. Case is ignored, because ATT&CK 19.2 spells four
+names two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling
+matches both. `detect.detectable` lists the ids of the analytics whose log sources you
+cover: an analytic is detectable only when every log source it needs is in your list; one
 that names no log source at all is never detectable. Channels are not compared: naming a
 log asserts you collect it, and the analytic's channel says which events within it matter.
-`summary` counts the mitigations and the analytics before `cat_i`, with how many are
-applicable and detectable when you passed the matching filter.
+Each list is present only when its filter was given (absent: not judged) and is empty when
+none qualify. `summary` counts the mitigations and the analytics before `cat_i`, with how
+many are applicable and detectable when you passed the matching filter.
 
-With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, a
+With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, with
+`analytics` as the same id-to-platforms map plus `applicable` and `detectable` id lists, a
 top-level `mitigations` map naming each M-id once, and a `coverage` block to `summary`,
 placed right before `cat_i`, ahead of the mitigation and detection counts.
 `summary.mitigations` there counts references across techniques, so a mitigation on two

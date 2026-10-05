@@ -1695,7 +1695,7 @@ def test_defenses_for_technique__t1078__carries_protect_and_detect_sections(kb_p
         {"id": "M1027", "name": "Password Policies"},
     ]
     assert result["detect"]["detection_strategy"] == {"id": "DET0001", "name": "Detect Valid Account Abuse"}
-    assert [a["id"] for a in result["detect"]["analytics"]] == ["AN0001", "AN0002"]
+    assert list(result["detect"]["analytics"]) == ["AN0001", "AN0002"]
     assert all(system["catalog"] == "disa" for system in result["resolved_systems"])
     assert result["protect"]["findings"]
     details = tools.finding_details(app_module.KnowledgeBase(kb_path), list(result["protect"]["findings"]))
@@ -1716,15 +1716,15 @@ def test_defenses_for_technique__platforms_and_log_sources__flag_analytics_and_c
         platforms=["Windows"],
         log_sources=["WinEventLog:Security", "WinEventLog:Sysmon"],
     )
-    flags = {a["id"]: (a["applicable"], a["detectable"]) for a in result["detect"]["analytics"]}
-    assert flags == {"AN0001": (True, True), "AN0002": (False, False)}
+    assert result["detect"]["applicable"] == ["AN0001"]
+    assert result["detect"]["detectable"] == ["AN0001"]
     assert result["summary"]["detection"] == {"analytics": 2, "applicable": 1, "detectable": 1}
 
 
 def test_defenses_for_technique__platforms_only__omits_the_detectable_count(kb_path):
     result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", platforms=["Linux"])
     assert result["summary"]["detection"] == {"analytics": 2, "applicable": 1}
-    assert all(a["detectable"] is None for a in result["detect"]["analytics"])
+    assert "detectable" not in result["detect"]
 
 
 def test_defenses_for_technique__unknown_platform__refuses_listing_the_vocabulary(kb_path):
@@ -1799,7 +1799,8 @@ def test_defenses_for_technique__unknown_log_source__suggests_the_spelling_most_
 
 def test_defenses_for_technique__platform_in_another_case__is_accepted(kb_path):
     result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", platforms=["windows"])
-    assert {a["id"]: a["applicable"] for a in result["detect"]["analytics"]} == {"AN0001": True, "AN0002": False}
+    assert set(result["detect"]["analytics"]) == {"AN0001", "AN0002"}
+    assert result["detect"]["applicable"] == ["AN0001"]
 
 
 @pytest.mark.parametrize("bad", ["Windows", "WinEventLog:Security", []])
@@ -1887,7 +1888,8 @@ def minority_spelling_kb(defenses_kb, tmp_path):
 
 def test_defenses_for_technique__log_source_spelled_another_case_in_attack__matches_it(minority_spelling_kb):
     result = tools.defenses_for_technique(minority_spelling_kb, "T9001", log_sources=["WinEventLog:Security"])
-    assert [(a["id"], a["detectable"]) for a in result["detect"]["analytics"]] == [("AN0004", True)]
+    assert list(result["detect"]["analytics"]) == ["AN0004"]
+    assert result["detect"]["detectable"] == ["AN0004"]
 
 
 def test_techniques_for_actor__one_spelling_of_a_log_source__matches_both_spellings(minority_spelling_kb):
@@ -1895,15 +1897,14 @@ def test_techniques_for_actor__one_spelling_of_a_log_source__matches_both_spelli
         minority_spelling_kb, "APT29", include_defenses=True, log_sources=["WinEventLog:Security"]
     )
     by_id = {t["technique_id"]: t for t in result["techniques"]}
-    assert by_id["T9001"]["analytics"][0]["detectable"] is True
+    assert "AN0004" in by_id["T9001"]["detectable"]
     assert "undetectable" not in by_id["T9001"]["gaps"]
 
 
 def test_defenses_for_technique__log_source_in_a_case_attack_never_uses__is_accepted_and_matches(defenses_kb):
     kb = app_module.KnowledgeBase(defenses_kb)
     result = tools.defenses_for_technique(kb, "T1078", log_sources=["WINEVENTLOG:SECURITY", "wineventlog:sysmon"])
-    flagged = {a["id"]: a["detectable"] for a in result["detect"]["analytics"]}
-    assert flagged["AN0001"] is True
+    assert "AN0001" in result["detect"]["detectable"]
 
 
 def test_techniques_for_actor__include_defenses_without_log_sources__judges_no_technique_undetectable(defenses_kb):
@@ -1919,10 +1920,9 @@ def test_techniques_for_actor__include_defenses__each_technique_lists_its_defens
     by_id = {t["technique_id"]: t for t in result["techniques"]}
     assert by_id["T1078"]["mitigations"] == ["M1026", "M1027"]
     assert by_id["T1078"]["detection_strategy"] == "DET0001"
-    assert [(a["id"], a["applicable"], a["detectable"]) for a in by_id["T1078"]["analytics"]] == [
-        ("AN0001", True, True),
-        ("AN0002", False, False),
-    ]
+    assert list(by_id["T1078"]["analytics"]) == ["AN0001", "AN0002"]
+    assert by_id["T1078"]["applicable"] == ["AN0001"]
+    assert by_id["T1078"]["detectable"] == ["AN0001"]
     assert by_id["T9000"]["mitigations"] == ["M1027"]  # arrives only through the revoked-by redirect
     assert by_id["T9002"]["mitigations"] == []
     assert result["mitigations"] == {
@@ -2101,4 +2101,55 @@ def test_defenses_for_technique__a_source_stored_with_trailing_whitespace__is_ac
     result = tools.defenses_for_technique(
         app_module.KnowledgeBase(kb_path), "T1078", log_sources=["auditd:SYSCALL", "auditd:EXECVE"]
     )
-    assert {a["id"]: a["detectable"] for a in result["detect"]["analytics"]} == {"AN0001": False, "AN0002": True}
+    assert set(result["detect"]["analytics"]) == {"AN0001", "AN0002"}
+    assert result["detect"]["detectable"] == ["AN0002"]
+
+
+def test_defenses_for_technique__both_filters__lists_qualifying_analytic_ids(kb_path):
+    result = tools.defenses_for_technique(
+        app_module.KnowledgeBase(kb_path),
+        "T1078",
+        platforms=["Windows"],
+        log_sources=["WinEventLog:Security", "WinEventLog:Sysmon"],
+    )
+    detect = result["detect"]
+    assert set(detect["analytics"]) == {"AN0001", "AN0002"}
+    assert set(detect["analytics"]["AN0001"]) == {"name", "platforms"}
+    assert detect["applicable"] == ["AN0001"]
+    assert detect["detectable"] == ["AN0001"]
+
+
+def test_defenses_for_technique__no_filters__omits_both_id_lists(kb_path):
+    detect = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078")["detect"]
+    assert "applicable" not in detect
+    assert "detectable" not in detect
+
+
+def test_defenses_for_technique__log_sources_no_analytic_meets__lists_none(kb_path):
+    detect = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", log_sources=["auditd:EXECVE"])[
+        "detect"
+    ]
+    assert detect["detectable"] == []
+    assert "applicable" not in detect
+
+
+def test_techniques_for_actor__both_filters__each_technique_maps_analytics_to_platforms(defenses_kb):
+    result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=_TELEMETRY)
+    t1078 = next(t for t in result["techniques"] if t["technique_id"] == "T1078")
+    assert t1078["analytics"] == {"AN0001": ["Windows"], "AN0002": ["Linux"]}
+    assert (t1078["applicable"], t1078["detectable"]) == (["AN0001"], ["AN0001"])
+
+
+def test_techniques_for_actor__no_filters__techniques_carry_no_id_lists(defenses_kb):
+    result = _apt29_coverage(defenses_kb)
+    assert not any("applicable" in t or "detectable" in t for t in result["techniques"])
+
+
+def test_techniques_for_actor__technique_without_a_detection_strategy__maps_no_analytics_and_judges_none(
+    defenses_kb, monkeypatch
+):
+    monkeypatch.setattr(queries, "detection_for_technique", lambda *args, **kwargs: None)
+    result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=_TELEMETRY)
+    t1078 = next(t for t in result["techniques"] if t["technique_id"] == "T1078")
+    assert (t1078["analytics"], t1078["applicable"], t1078["detectable"]) == ({}, [], [])
+    assert t1078["detection_strategy"] is None
