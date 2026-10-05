@@ -920,8 +920,8 @@ A benchmark can lose every rule it parsed. On the 2020_01-family builds five did
 2026 library produced one. The `stigs` row is written before any rule, so such a benchmark still
 exists and a query scoped to it returns that row and no rules: `_explicit_scope` hydrates it, the
 join through `rule_cci` and `stig_rules` matches nothing, and the tool layer reports "Control X has
-no rules in the resolved STIG(s)". The guidance is retrievable, but only through the benchmark that
-holds the ids.
+no rules, at the control or any of its enhancements, in the resolved STIG(s)". The guidance is
+retrievable, but only through the benchmark that holds the ids.
 
 One caveat on "the guidance is retrievable": of the 3556 drops on the 2020_01 build, nine involve a
 rule whose text differs from the one the holder stored, in title, fix text or check text and
