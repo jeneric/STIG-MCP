@@ -1724,6 +1724,65 @@ def test_defenses_for_technique__unknown_log_source__refuses_naming_the_closest_
     assert "WinEventLog:Security" in message
 
 
+# A slice of ATT&CK 19.2's log source names, chosen so plain character similarity picks wrong.
+_ATTACK_NAMES = [
+    "macos:unifiedlog",
+    "WinEventLog:Microsoft-Windows-COM/Operational",
+    "WinEventLog:Microsoft-Windows-CodeIntegrity/Operational",
+    "WinEventLog:Microsoft-Windows-Windows Defender/Operational",
+    "WinEventLog:Sysmon",
+    "linux:Sysmon",
+    "systemd:unit",
+    "snmp:syslog",
+    "WinEventLog:PowerShell",
+    "esxi:shell",
+    "linux:shell",
+    "WinEventLog:Security",
+    "WinEventLog:System",
+    "macOS:unifiedlog",
+    "macos:syslog",
+]
+
+
+@pytest.mark.parametrize(
+    ("asked", "expected"),
+    [
+        ("WinEventLog:Microsoft-Windows-Sysmon/Operational", "WinEventLog:Sysmon"),
+        ("Microsoft-Windows-PowerShell/Operational", "WinEventLog:PowerShell"),
+        ("powershell", "WinEventLog:PowerShell"),
+        ("WinEventLog:Securty", "WinEventLog:Security"),
+    ],
+)
+def test_closest__a_name_attack_spells_differently__suggests_it_first(asked, expected):
+    assert tools._closest(asked, tools._spellings_by_key(_ATTACK_NAMES))[0] == expected
+
+
+def test_closest__sysmon__suggests_both_sysmon_logs():
+    assert set(tools._closest("sysmon", tools._spellings_by_key(_ATTACK_NAMES))[:2]) == {
+        "WinEventLog:Sysmon",
+        "linux:Sysmon",
+    }
+
+
+def test_closest__a_name_spelled_two_ways__is_suggested_once_in_the_first_spelling():
+    closest = tools._closest("macos:unifedlog", tools._spellings_by_key(_ATTACK_NAMES))
+    assert closest[0] == "macos:unifiedlog"
+    assert "macOS:unifiedlog" not in closest
+
+
+def test_defenses_for_technique__unknown_log_source__suggests_the_spelling_most_analytics_use(minority_spelling_kb):
+    with pytest.raises(tools.CallerError) as excinfo:
+        tools.defenses_for_technique(minority_spelling_kb, "T9001", log_sources=["WinEventLog:Securty"])
+    message = str(excinfo.value)
+    assert "WinEventLog:Security" in message
+    assert "WinEventLog:SECURITY" not in message
+
+
+def test_defenses_for_technique__platform_in_another_case__is_accepted(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", platforms=["windows"])
+    assert {a["id"]: a["applicable"] for a in result["detect"]["analytics"]} == {"AN0001": True, "AN0002": False}
+
+
 @pytest.mark.parametrize("bad", ["Windows", "WinEventLog:Security", []])
 def test_defenses_for_technique__a_bare_string_or_empty_list_for_a_filter__is_refused_not_iterated(kb_path, bad):
     kb = app_module.KnowledgeBase(kb_path)
@@ -1793,13 +1852,14 @@ def test_techniques_for_actor__include_defenses__counts_every_coverage_class_dis
 
 @pytest.fixture
 def minority_spelling_kb(defenses_kb, tmp_path):
-    """defenses_kb with AN0004 (T9001) needing 'WinEventLog:security', as ATT&CK 19.2 spells
-    four names two ways; AN0001 keeps 'WinEventLog:Security'."""
+    """defenses_kb with AN0004 (T9001) needing 'WinEventLog:SECURITY', as ATT&CK 19.2 spells four
+    names two ways; AN0001 keeps 'WinEventLog:Security'. The rare spelling sorts first, so
+    alphabetical order cannot pick the common one by accident."""
     target = tmp_path / "kb.sqlite"
     shutil.copyfile(defenses_kb, target)
     with closing(sqlite3.connect(target)) as conn, conn:
         changed = conn.execute(
-            "UPDATE analytic_log_sources SET name = 'WinEventLog:security' "
+            "UPDATE analytic_log_sources SET name = 'WinEventLog:SECURITY' "
             "WHERE analytic_id = 'AN0004' AND name = 'WinEventLog:Security'"
         ).rowcount
     assert changed == 1

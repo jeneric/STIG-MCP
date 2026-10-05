@@ -1,4 +1,6 @@
 import difflib
+import re
+from collections import Counter
 
 from stig_mcp.kb import freshness, install, queries, releases
 from stig_mcp.resolver.resolver import resolve
@@ -376,13 +378,14 @@ def _check_platforms(conn, platforms):
     if wanted is None:
         return None
     known = queries.platform_names(conn)
-    unknown = [platform for platform in wanted if platform not in known]
+    spellings = _spellings_by_key(known)
+    unknown = [platform for platform in wanted if platform.casefold() not in spellings]
     if unknown:
         raise CallerError(
             f"platforms names {', '.join(repr(p) for p in unknown)}, which ATT&CK does not use. "
-            f"Pass names from this list exactly: {', '.join(known)}."
+            f"Pass names from this list, in any case: {', '.join(known)}."
         )
-    return wanted
+    return list(dict.fromkeys(spellings[platform.casefold()][0] for platform in wanted))
 
 
 def _check_log_sources(conn, log_sources):
@@ -400,7 +403,7 @@ def _check_log_sources(conn, log_sources):
     if unknown:
         hints = []
         for source in unknown:
-            closest = difflib.get_close_matches(source, known, n=3, cutoff=0.0)
+            closest = _closest(source, spellings)
             hints.append(f"'{source}' (closest: {', '.join(closest)})")
         raise CallerError(
             f"log_sources names sources ATT&CK does not use: {'; '.join(hints)}. Pass ATT&CK's log "
@@ -416,6 +419,32 @@ def _spellings_by_key(names):
     for name in names:
         spellings.setdefault(name.casefold(), []).append(name)
     return spellings
+
+
+_WORD_BREAK = re.compile(r"[^0-9a-z]+")
+
+
+def _words(name):
+    return {word for word in _WORD_BREAK.split(name.casefold()) if word}
+
+
+def _closest(asked, spellings, n=3):
+    """The n names nearest `asked`, one spelling each. Names sharing the caller's rarest known
+    word come first, so 'WinEventLog:Microsoft-Windows-Sysmon/Operational' leads with
+    WinEventLog:Sysmon rather than the names it shares 'Microsoft-Windows' with."""
+    names = [variants[0] for variants in spellings.values()]
+    word_counts = Counter(word for name in names for word in _words(name))
+
+    def similarity(name):
+        return difflib.SequenceMatcher(None, asked.casefold(), name.casefold()).ratio()
+
+    shared = [word for word in _words(asked) if word in word_counts]
+    first = []
+    if shared:
+        rarest = min(shared, key=lambda word: (word_counts[word], word))
+        first = sorted((name for name in names if rarest in _words(name)), key=similarity, reverse=True)[:n]
+    rest = sorted((name for name in names if name not in first), key=similarity, reverse=True)
+    return (first + rest)[:n]
 
 
 def _resolve_scope(conn, system_description, benchmark_ids):

@@ -537,14 +537,15 @@ def test_defense_details__lowercase_padded_and_unknown_ids__match_case_insensiti
     assert details["analytics"] == []
 
 
-def test_platform_and_log_source_names__the_fixture__are_sorted_vocabularies(kb_path):
+def test_platform_and_log_source_names__the_fixture__sort_platforms_and_put_the_most_used_log_source_first(kb_path):
     conn = open_db_for_test(kb_path)
     assert queries.platform_names(conn) == ["Linux", "Windows"]
+    # auditd:SYSCALL is the one log two analytics name; the rest tie at one and sort by name.
     assert queries.log_source_names(conn) == [
+        "auditd:SYSCALL",
         "WinEventLog:Security",
         "WinEventLog:Sysmon",
         "auditd:EXECVE",
-        "auditd:SYSCALL",
     ]
 
 

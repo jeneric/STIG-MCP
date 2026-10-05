@@ -571,4 +571,10 @@ def platform_names(conn):
 
 
 def log_source_names(conn):
-    return [r[0] for r in conn.execute("SELECT DISTINCT name FROM analytic_log_sources ORDER BY name")]
+    """Most-used first, so of two spellings ATT&CK uses for one log the common one leads."""
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM analytic_log_sources GROUP BY name ORDER BY COUNT(DISTINCT analytic_id) DESC, name"
+        )
+    ]
