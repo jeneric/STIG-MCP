@@ -175,15 +175,16 @@ def _register_actor_tool(server, kb):
         classes the call can judge that count that technique as a gap (mitigated_without_rules needs a scoped
         system, without_applicable_analytic platforms, undetectable log_sources), so read gaps rather than
         deriving them. mitigations maps each M-id to its name once, while summary.mitigations counts
-        mitigation references across techniques (one on two techniques counts twice). summary.coverage counts
-        techniques: without_mitigation, mitigated_without_rules (only when a system was scoped; with severity,
-        no rules at the requested CAT levels), without_applicable_analytic (only with platforms), detectable
-        and undetectable (only with log_sources); summary.detection counts analytics instead. Detection is
-        judged applicability first when platforms is given, then detectability over the applicable analytics.
-        platforms marks each analytic applicable or not, and log_sources marks it detectable or not, as in
-        defenses_for_technique; log_sources takes up to 100 names. Call defense_details with M-, DET- or AN-
-        ids for MITRE's text. If the knowledge base is not built yet this returns {"status": "not_ready"} with
-        the commands to run, rather than an error."""
+        mitigation references across techniques (one on two techniques counts twice). summary.coverage, which
+        comes right after control_counts, counts techniques: without_mitigation, mitigated_without_rules (only
+        when a system was scoped; with severity, no rules at the requested CAT levels),
+        without_applicable_analytic (only with platforms), detectable and undetectable (only with
+        log_sources); summary.detection counts analytics instead. Detection is judged applicability first when
+        platforms is given, then detectability over the applicable analytics. platforms marks each analytic
+        applicable or not, and log_sources marks it detectable or not, as in defenses_for_technique;
+        log_sources takes up to 100 names. Call defense_details with M-, DET- or AN- ids for MITRE's text. If
+        the knowledge base is not built yet this returns {"status": "not_ready"} with the commands to run,
+        rather than an error."""
         with _guidance_reaches_the_caller():
             return _compact(
                 tools.techniques_for_actor(

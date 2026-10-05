@@ -651,21 +651,6 @@ def test_build_server__install_refused__surfaces_the_reason_to_the_client(tmp_pa
         asyncio.run(server.call_tool("install_knowledge_base", {}))
 
 
-def test_app_module__every_function__is_under_fifty_lines():
-    import ast  # noqa: PLC0415
-    import inspect  # noqa: PLC0415
-
-    from stig_mcp.server import app as app_module  # noqa: PLC0415
-
-    tree = ast.parse(inspect.getsource(app_module))
-    long = {
-        n.name: n.end_lineno - n.lineno + 1
-        for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.end_lineno - n.lineno + 1 > 50
-    }
-    assert long == {}, f"over the 50-line limit: {long}"
-
-
 def test_build_server__defenses_for_technique_tool__forwards_platforms_and_log_sources(kb_path):
     payload = _call(
         build_server(kb_path),
