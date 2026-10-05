@@ -2447,6 +2447,20 @@ def test_build_kb__summary__counts_the_defensive_rows(tmp_path):
     assert (*counts, summary["analytic_log_sources"]) == (2, 2, 3, 5)
 
 
+def test_build_kb__an_analytic_naming_one_log_source_twice__summary_counts_the_stored_rows(tmp_path):
+    # ATT&CK 19.2 has analytics that repeat a name and channel pair; the table keeps one.
+    bundle = json.loads((FIX / "attack_bundle.json").read_text())
+    analytic = next(
+        o for o in bundle["objects"] if o["type"] == "x-mitre-analytic" and o["x_mitre_log_source_references"]
+    )
+    analytic["x_mitre_log_source_references"].append(dict(analytic["x_mitre_log_source_references"][0]))
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle))
+    summary = build_kb(_sources(attack_path=tmp_path / "bundle.json"), tmp_path / "kb.sqlite")
+    stored = open_db_for_test(tmp_path / "kb.sqlite").execute("SELECT COUNT(*) FROM analytic_log_sources").fetchone()[0]
+    assert stored == 5
+    assert summary["analytic_log_sources"] == stored
+
+
 def test_build_kb__defense_edges_targeting_an_intrusion_set__build_without_them(tmp_path):
     bundle = json.loads((FIX / "attack_bundle.json").read_text())
     bundle["objects"] += defense_edges_to_an_intrusion_set()

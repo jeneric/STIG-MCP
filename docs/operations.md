@@ -200,7 +200,7 @@ The summary reports both `stig_files` (documents that classified as a STIG and p
 `stigs` (unique benchmarks that survived selection).
 
 The summary also counts `mitigations`, `detection_strategies`, `analytics` and
-`analytic_log_sources` from the ATT&CK bundle (44, 697, 1,745 and 4,160 for ATT&CK 19.2).
+`analytic_log_sources` from the ATT&CK bundle (44, 697, 1,745 and 4,130 for ATT&CK 19.2).
 The ingest refuses a bundle that yields zero live mitigations, or zero detection strategies
 joined to a technique by a `detects` relationship, and names the count: that is what a
 change to ATT&CK's data model looks like, and an unattended build must stop rather than

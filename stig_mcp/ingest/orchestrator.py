@@ -262,7 +262,8 @@ def _load_defenses(conn, attack, summary):
     summary["mitigations"] = len(attack.mitigations)
     summary["detection_strategies"] = len(strategies)
     summary["analytics"] = len(analytics)
-    summary["analytic_log_sources"] = sum(len(a.log_sources) for a in analytics)
+    # Rows, not parsed references: some analytics repeat a name and channel pair, stored once.
+    summary["analytic_log_sources"] = conn.execute("SELECT COUNT(*) FROM analytic_log_sources").fetchone()[0]
 
 
 def _load_ctid_status(conn, ctid, revocations):
