@@ -657,6 +657,65 @@ def cci_batch_kb(tmp_path):
 
 
 @pytest.fixture
+def enhancement_kb(tmp_path):
+    """Rules reaching AC-2 by every path the enhancement roll-up must tell apart.
+
+    E_BASE cites AC-2 only; E_BOTH cites AC-2 and AC-2(1) through two CCIs, so it is base-level
+    evidence; E_TWO_ENH cites AC-2(1) and AC-2(3), so it reaches AC-2 twice and must still be one
+    row; E_ONE_ENH (CAT II) cites AC-2(3) only. E_NEAR cites AC-20, which a prefix without the
+    parenthesis would match; E_OTHER cites AC-6(9), an enhancement of another base. E_V2_ENH sits
+    at major 2 under AC-2(1), for the scope filter.
+
+    Every controls row has a NULL parent_control_id, as a KB built without the NIST catalog
+    does, so a roll-up that reads the parent link instead of the id finds nothing.
+    """
+    db = tmp_path / "enhancement.sqlite"
+    conn = create_db(db)
+    ccis = {
+        "CCI-000010": "AC-2",
+        "CCI-000011": "AC-2(1)",
+        "CCI-000013": "AC-2(3)",
+        "CCI-000020": "AC-20",
+        "CCI-000069": "AC-6(9)",
+    }
+    for control_id in ("AC-2", "AC-2(1)", "AC-2(3)", "AC-20", "AC-6", "AC-6(9)"):
+        conn.execute(
+            "INSERT INTO controls (control_id, is_enhancement) VALUES (?, ?)", (control_id, int("(" in control_id))
+        )
+    for cci_id, control_id in ccis.items():
+        conn.execute("INSERT INTO ccis (cci_id, definition) VALUES (?, ?)", (cci_id, f"definition of {cci_id}"))
+        conn.execute("INSERT INTO cci_control (cci_id, control_id) VALUES (?, ?)", (cci_id, control_id))
+    for version in ("1", "2"):
+        conn.execute(
+            "INSERT INTO stigs (stig_id, version, title, product_keywords, origin, source_artifact, release_label) "
+            "VALUES ('E_STIG', ?, 'E Guide', 'e', 'library', 'test fixture', ?)",
+            (version, f"V{version}R1"),
+        )
+    rules = (
+        ("E_BASE", "1", "I", ("CCI-000010",)),
+        ("E_BOTH", "1", "I", ("CCI-000010", "CCI-000011")),
+        ("E_TWO_ENH", "1", "I", ("CCI-000011", "CCI-000013")),
+        ("E_ONE_ENH", "1", "II", ("CCI-000013",)),
+        ("E_NEAR", "1", "I", ("CCI-000020",)),
+        ("E_OTHER", "1", "I", ("CCI-000069",)),
+        ("E_V2_ENH", "2", "I", ("CCI-000011",)),
+    )
+    for rule_id, version, cat, rule_ccis in rules:
+        conn.execute(
+            "INSERT INTO stig_rules (rule_id, group_id, stig_id, stig_version, severity_cat, severity_level, "
+            "title, fix_text, check_text) VALUES (?, ?, 'E_STIG', ?, ?, 'x', ?, 'fix', 'check')",
+            (rule_id, f"V-{rule_id}", version, cat, f"title of {rule_id}"),
+        )
+        for cci_id in rule_ccis:
+            conn.execute("INSERT INTO rule_cci (rule_id, cci_id) VALUES (?, ?)", (rule_id, cci_id))
+    conn.commit()
+    conn.close()
+    conn = open_db(db)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
 def version_specificity_kb(tmp_path):
     """Two benchmarks whose unnamed-token counts differ ONLY in their VERSION tokens.
 
