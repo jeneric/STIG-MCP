@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import sqlite3
 from contextlib import closing
@@ -232,6 +233,8 @@ def test_techniques_for_actor__include_defenses__summary_comes_first(mixed_kb):
     result = tools.techniques_for_actor(mixed_kb, "APT29", benchmark_ids=["MIXED_SEVERITY_STIG"], include_defenses=True)
     assert next(iter(result)) == "summary"
     assert result["summary"]["by_cat"] == {"I": 1, "II": 1, "III": 1}
+    assert result["findings"]
+    assert all(set(f) == _LIST_FINDING_KEYS for f in result["findings"].values())
 
 
 def test_techniques_for_actor__scope_notes__appear_once_on_the_answer_not_per_technique(mixed_kb):
@@ -507,10 +510,11 @@ def test_defenses_for_technique__severity_i__lists_the_bare_cat(mixed_kb):
 
 
 def test_techniques_for_actor__listing_findings__leaves_the_shared_rows_whole(kb_path, rows_with_via):
+    before = copy.deepcopy(rows_with_via)
     tools.techniques_for_actor(
         app_module.KnowledgeBase(kb_path), "APT29", benchmark_ids=["RHEL_9_STIG"], include_defenses=True
     )
-    assert all("rule_id" in row and isinstance(row["severity"], dict) for row in rows_with_via)
+    assert rows_with_via == before
 
 
 def test_defenses_for_technique__finding_without_a_v_id__keeps_null_and_cat_i_uses_the_rule_id(kb_path, monkeypatch):
@@ -525,5 +529,5 @@ def test_defenses_for_technique__controls__map_each_control_id_to_its_entry(mixe
     result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
     controls = result["protect"]["controls"]
     assert isinstance(controls, dict)
-    assert all(set(entry) <= {"name", "family", "source", "rules", "via"} for entry in controls.values())
+    assert all(set(entry) - {"via"} == {"name", "family", "source", "rules"} for entry in controls.values())
     assert controls["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
