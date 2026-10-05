@@ -652,3 +652,11 @@ def test_app_module__every_function__is_under_fifty_lines():
         if isinstance(n, ast.FunctionDef) and n.end_lineno - n.lineno + 1 > 50
     }
     assert long == {}, f"over the 50-line limit: {long}"
+
+
+@pytest.mark.parametrize("name", ["mitigations_for_technique", "techniques_for_actor"])
+def test_build_server__answer_tool_description__explains_enhancement_rules_and_via(kb_path, name):
+    server = build_server(kb_path)
+    description = next(t.description for t in asyncio.run(server.list_tools()) if t.name == name)
+    assert "enhancements" in description
+    assert "via" in description

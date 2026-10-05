@@ -279,6 +279,12 @@ That is not an error: different products enforce different slices of 800-53, and
 writes STIG rules per product, not per control. The control is still relevant; this
 benchmark just does not have a checkable rule for it.
 
+CTID maps techniques to base controls such as AC-6, while DISA often tags a rule to one of
+the control's enhancements, such as AC-6(9). The server counts a rule tagged to an
+enhancement toward its base control, so a control reported with no rules has none at the
+control or any of its enhancements. A control whose rules come only through enhancements
+says so in `via`, which maps each enhancement to those rules.
+
 ### Why does the answer say benchmarks were omitted?
 
 When more benchmarks tie with the last benchmark shown than the limit allows, the response
@@ -364,8 +370,9 @@ to summarize, which is how a list of CAT I findings comes back incomplete.
 So `mitigations_for_technique` and `techniques_for_actor` send one line of compact JSON
 that lists each finding once, by id, severity and title, and opens with `summary`: the
 number of rules found, the number at each CAT, `control_counts` (how many controls map
-and how many have rules in the resolved STIGs), `cat_i` (the CAT I V- ids with their
-count) and, last, the ids of the controls that have rules. `techniques_for_actor` also
+and how many have rules in the resolved STIGs, counting rules tagged to a control's
+enhancements), `cat_i` (the CAT I V- ids with their count) and, last, the ids of the
+controls that have rules. `techniques_for_actor` also
 counts the techniques.
 The counts come first so they fall inside that preview, and they spare the model counting
 long lists itself, which it gets wrong. How many CAT I ids also fit depends on the client:
@@ -567,10 +574,12 @@ The response's `technique` block is T1078 (Valid Accounts) with `redirected_from
 since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `controls` lists
 the 800-53r5 controls mapped to T1078 (AC-2, AC-3, AC-6, and others), each naming the
 `rules` for that benchmark, and `findings` lists each of those rules once, CAT-ordered.
-Some controls come back with rules; others come back empty with a `notes` entry reading
-"Control AC-2 has no rules in the resolved STIG(s)." That means the RHEL 9 STIG, as DISA
-wrote it, has no rule tagged to a CCI under AC-2, not that AC-2 is irrelevant. To quote
-the steps themselves, the model then calls `finding_details` with the V- ids of the
+Some controls come back with rules. AC-2 is one, though DISA tags none of its RHEL 9 rules
+to AC-2 itself: they sit under its enhancements, and AC-2's `via` names which. Others come
+back empty with a `notes` entry reading "Control AC-5 has no rules, at the control or any of
+its enhancements, in the resolved STIG(s)." That means the RHEL 9 STIG, as DISA wrote it,
+has no rule tagged to a CCI under AC-5 or its enhancements, not that AC-5 is irrelevant.
+To quote the steps themselves, the model then calls `finding_details` with the V- ids of the
 findings it is answering about, and reads DISA's check and fix text from that.
 
 ### A revoked id: T1086 on Windows 11
