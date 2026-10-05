@@ -166,7 +166,7 @@ GitHub Copilot needs one more thing before any of this works: see the Agent-mode
 requirement in the README's [quick start](../README.md#vs-code-github-copilot).
 
 To tell whether a tool actually ran, look for the tool's output shape in the answer:
-benchmark ids, rule ids (`SV-...r..._rule`), CCI numbers, or CAT severities the model has
+benchmark ids, rule ids (`SV-...r..._rule`), or CAT severities the model has
 no other way to produce verbatim. A fluent paragraph with no ids, rule numbers, or a
 `notes` explanation in it is a sign the model answered from memory, not from a result.
 
@@ -426,8 +426,8 @@ return a very large answer, especially from `techniques_for_actor` with
 A few products ship two STIG versions at once, and their remediations differ. vSphere 8.0
 is the only one in the current library: DISA publishes V2 as current guidance and bundles
 V1R1 as supplemental guidance for older builds. Ask about ESXi 8.0 without saying which
-build you run and you get both, labeled by `stig_version`, because neither can be ruled
-out.
+build you run and you get both, labeled by `benchmark` (`…/1` and `…/2`), because neither
+can be ruled out.
 
 Name the build and you get one:
 
@@ -457,11 +457,11 @@ Because the answers would be too big to read. DISA's check and fix text is most 
 finding, and an actor's techniques share most of their findings, so an answer carrying
 all of it would run to megabytes. VS Code's Copilot agent currently saves any tool result
 over 8 KB to a temporary file and shows the model only its first 500 characters; Claude
-Code does the same above 25,000 tokens. A model then reads the file in pieces and tends
+Code saves any text result over 50,000 characters to a file. A model then reads the file in pieces and tends
 to summarize, which is how a list of CAT I findings comes back incomplete.
 
 So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON
-that lists each finding once, by id, severity and title, and opens with `summary`: the
+that lists each finding once, by benchmark, V- id, CAT and title, and opens with `summary`: the
 number of rules found, the number at each CAT, `control_counts` (how many controls map
 and how many have rules in the resolved STIGs, counting rules tagged to a control's
 enhancements), the mitigation and detection counts, `cat_i` (the CAT I V- ids with their
@@ -475,7 +475,7 @@ the ids in view are all of them. That count is of V- ids, not rules: a requireme
 two majors, as vSphere 8.0's are, is one V- id and two rules.
 
 Ask for the steps of the findings you care about and the model calls `finding_details`,
-which returns DISA's exact check and fix text for up to 50 rule ids or V- ids at a time.
+which returns DISA's exact check and fix text, and the CCIs, for up to 50 rule ids or V- ids at a time.
 A V- id that two benchmarks or two majors share returns every match, each labeled with its
 benchmark.
 

@@ -709,7 +709,7 @@ def defenses_for_technique(  # noqa: PLR0913
         "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts),
         "technique": technique,
         "resolved_systems": _with_catalog(resolved_systems),
-        "protect": {"controls": controls, "findings": findings, "mitigations": mitigations},
+        "protect": {"controls": controls, "findings": _listed_findings(findings), "mitigations": mitigations},
         "detect": detection,
         "notes": notes + scope_notes + technique_notes,
         "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},
@@ -795,6 +795,24 @@ def _cat_ordered(findings):
         key=lambda f: (rank.get(f["severity"]["cat"], rank["III"]), f["stig_id"], f["stig_version"], f["rule_id"]),
     )
     return {f["rule_id"]: f for f in ordered}
+
+
+def _benchmark_key(row):
+    return f"{row['stig_id']}/{row['stig_version']}"
+
+
+def _listed_findings(findings):
+    """List-answer entries: the rule id is the key, resolved_systems describes the benchmark,
+    the CAT fixes the level, and CCIs stay in finding_details."""
+    return {
+        rule_id: {
+            "benchmark": _benchmark_key(finding),
+            "group_id": finding["group_id"],
+            "severity": finding["severity"]["cat"],
+            "title": finding["title"],
+        }
+        for rule_id, finding in findings.items()
+    }
 
 
 def _summary(findings, rules_by_control, defense_counts=None):
@@ -995,7 +1013,7 @@ def techniques_for_actor(  # noqa: PLR0913
         "resolved_systems": _with_catalog(resolved_systems),
         "techniques": techniques,
         "controls": controls,
-        "findings": findings,
+        "findings": _listed_findings(findings),
         "mitigations": dict(sorted(mitigation_names.items())),
         "notes": notes,
         "sources": sources,

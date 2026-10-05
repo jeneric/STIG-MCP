@@ -118,9 +118,10 @@ def _register_answer_tools(server, kb):
         with their count), then controls_with_rules. Use those counts rather than counting lists yourself. A
         control's rules include those DISA tags to its enhancements (e.g. AC-6(9) under AC-6), since the
         ATT&CK mapping names base controls; via, when present, maps each enhancement to the rules that reach
-        the control only through it. Findings carry no check or fix text: call finding_details with their rule
-        ids or V- ids for DISA's exact steps. severity narrows findings to CAT levels, e.g. ["I"]. A technique
-        id ATT&CK has revoked (e.g. T1562) is answered for its replacement, and the response reports the
+        the control only through it. Each finding gives its benchmark (stig_id/version, described in
+        resolved_systems), V- id, CAT and title; call finding_details with rule ids or V- ids for DISA's check
+        and fix text and the CCIs. severity narrows findings to CAT levels, e.g. ["I"]. A technique id
+        ATT&CK has revoked (e.g. T1562) is answered for its replacement, and the response reports the
         redirect in technique.redirected_from. Include the product build in system_description where one
         exists (e.g. 'ESXi 8.0 U3'): some products ship two STIG versions with different remediations, and the
         build selects the one that applies. benchmark_ids narrows to benchmarks you already know and accepts
@@ -166,7 +167,8 @@ def _register_actor_tool(server, kb):
         the techniques; with include_defenses it adds the same counts defenses_for_technique gives, across
         every technique. Use those counts rather than counting lists yourself. controls lists each control
         once with its rule ids, including rules DISA tags to its enhancements, which via names, and findings
-        lists each finding once, without check or fix text (call finding_details for those). Each technique
+        lists each finding once, without check or fix text (call finding_details for those), each naming its
+        benchmark, V- id, CAT and title. Each technique
         lists its control ids grouped by where the mapping came from ("ctid" or "override"). benchmark_ids
         accepts at most 200; it, severity (CAT levels, e.g. ["I"]), platforms and log_sources are validated
         always but only take effect with include_defenses. To scope a system you cannot name, pass

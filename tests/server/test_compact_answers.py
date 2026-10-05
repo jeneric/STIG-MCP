@@ -12,7 +12,8 @@ from stig_mcp.server import app as app_module
 from stig_mcp.server import tools
 from tests.conftest import FIX, discovered, open_db_for_test
 
-_LIST_FINDING_KEYS = {"catalog", "stig_id", "stig_version", "rule_id", "group_id", "severity", "title", "ccis"}
+_LIST_FINDING_KEYS = {"benchmark", "group_id", "severity", "title"}
+_ROW_KEYS = {"catalog", "stig_id", "stig_version", "rule_id", "group_id", "severity", "title", "ccis"}
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +80,7 @@ def test_findings_for_control__any_finding__carries_no_text_or_benchmark_details
     assert findings
     # via is the row's internal record of the enhancements a rule came through; the answer
     # strips it from findings, as the next test pins.
-    assert all(set(f) == _LIST_FINDING_KEYS | {"via"} for f in findings)
+    assert all(set(f) == _ROW_KEYS | {"via"} for f in findings)
 
 
 def test_findings_for_control__severity_filter__keeps_only_those_cats(mixed_kb):
@@ -121,7 +122,8 @@ def test_defenses_for_technique__any_answer__lists_each_finding_once_and_control
     assert "stig_findings" not in ac2_1
     assert set(ac2_1["rules"]) == set(result["protect"]["findings"])
     assert all(set(f) == _LIST_FINDING_KEYS for f in result["protect"]["findings"].values())
-    assert all(key == f["rule_id"] for key, f in result["protect"]["findings"].items())
+    details = tools.finding_details(mixed_kb, list(result["protect"]["findings"]))["findings"]
+    assert {d["rule_id"] for d in details} == set(result["protect"]["findings"])
 
 
 def test_defenses_for_technique__summary__comes_first_and_counts_by_cat(mixed_kb):
@@ -486,3 +488,34 @@ def test_compact_answers__every_count__closes_inside_the_preview_window(request,
     )
     assert _counts_end(technique) < _PREVIEW
     assert _counts_end(actor) < _PREVIEW
+
+
+def test_defenses_for_technique__list_findings__name_the_benchmark_and_the_cat_only(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])
+    finding = result["protect"]["findings"]["SV-770002r1_rule"]
+    assert finding == {
+        "benchmark": "MIXED_SEVERITY_STIG/1",
+        "group_id": "V-770002",
+        "severity": "I",
+        "title": finding["title"],
+    }
+
+
+def test_defenses_for_technique__severity_i__lists_the_bare_cat(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"], severity=["I"])
+    assert [f["severity"] for f in result["protect"]["findings"].values()] == ["I"]
+
+
+def test_techniques_for_actor__listing_findings__leaves_the_shared_rows_whole(kb_path, rows_with_via):
+    tools.techniques_for_actor(
+        app_module.KnowledgeBase(kb_path), "APT29", benchmark_ids=["RHEL_9_STIG"], include_defenses=True
+    )
+    assert all("rule_id" in row and isinstance(row["severity"], dict) for row in rows_with_via)
+
+
+def test_defenses_for_technique__finding_without_a_v_id__keeps_null_and_cat_i_uses_the_rule_id(kb_path, monkeypatch):
+    row = {**_finding("SV-9r1_rule", "I"), "group_id": None, "via": []}
+    monkeypatch.setattr(queries, "findings_for_control", lambda conn, cid, *rest: [row] if cid == "AC-2" else [])
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    assert result["protect"]["findings"]["SV-9r1_rule"]["group_id"] is None
+    assert result["summary"]["cat_i"]["ids"] == ["SV-9r1_rule"]

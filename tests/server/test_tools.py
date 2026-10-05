@@ -142,6 +142,20 @@ def test_defenses_for_technique__id_with_two_majors__lists_every_version(tmp_pat
     assert sorted(s["version"] for s in result["resolved_systems"]) == ["1", "2"]
 
 
+def test_defenses_for_technique__two_majors_of_one_benchmark__keep_distinct_benchmark_keys(tmp_path, monkeypatch):
+    conn = _governed_kb(tmp_path, monkeypatch)
+    result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    assert {f["benchmark"] for f in result["protect"]["findings"].values()} == {"RHEL_9_STIG/1", "RHEL_9_STIG/2"}
+
+
+def test_finding_details__list_answers_drop_ccis__finding_details_still_returns_them(kb_path):
+    kb = app_module.KnowledgeBase(kb_path)
+    listed = tools.defenses_for_technique(kb, "T1078", benchmark_ids=["RHEL_9_STIG"])["protect"]["findings"]
+    assert listed and not any("ccis" in f for f in listed.values())
+    details = tools.finding_details(kb, list(listed))["findings"]
+    assert all(row["ccis"] for row in details)
+
+
 RULES_YAML = (
     "TEST_RHEL:\n"
     "  id_pattern: '^RHEL_9_STIG$'\n"
@@ -236,7 +250,7 @@ def test_defenses_for_technique__mixed_severity_findings__ordered_cat_i_first(tm
     conn = open_db_for_test(out)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])
     ac2_1 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)")
-    cats = [result["protect"]["findings"][rule]["severity"]["cat"] for rule in ac2_1["rules"]]
+    cats = [result["protect"]["findings"][rule]["severity"] for rule in ac2_1["rules"]]
     # Both halves matter: the equality pins the order, and the set pins that the fixture still
     # supplies three severities, so the order check cannot go quietly vacuous.
     assert set(cats) == {"I", "II", "III"}, "the fixture must supply every severity"
@@ -383,7 +397,7 @@ def test_defenses_for_technique__id_in_neither_table__still_raises_with_guidance
 def test_defenses_for_technique__build_selects_a_major__returns_only_that_versions_findings(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
-    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
+    versions = {f["benchmark"].rpartition("/")[2] for f in result["protect"]["findings"].values()}
     assert versions == {"2"}
     assert any("build update 3" in n for n in result["notes"])
 
@@ -391,7 +405,7 @@ def test_defenses_for_technique__build_selects_a_major__returns_only_that_versio
 def test_defenses_for_technique__no_build_supplied__still_returns_both_majors_with_a_note(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9")
-    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
+    versions = {f["benchmark"].rpartition("/")[2] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
     assert any("Supply a build" in n for n in result["notes"])
 
@@ -415,7 +429,7 @@ def test_defenses_for_technique__ungoverned_benchmark_with_a_build__says_the_bui
 def test_defenses_for_technique__explicit_benchmark_ids__are_unaffected_by_applicability(tmp_path, monkeypatch):
     conn = _governed_kb(tmp_path, monkeypatch)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
-    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
+    versions = {f["benchmark"].rpartition("/")[2] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
 
 
@@ -430,7 +444,11 @@ def test_defenses_for_technique__limit_would_split_a_benchmarks_majors__keeps_th
     conn = _governed_kb(tmp_path, monkeypatch, extra_stig_paths=[discovered(FIX / "win2022_xccdf.xml")])
     monkeypatch.setattr(tools, "resolve", lambda conn, description: real_resolve(conn, description, limit=2))
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="Windows Server 2022, RHEL 9 U3")
-    rhel_versions = {f["stig_version"] for f in result["protect"]["findings"].values() if f["stig_id"] == "RHEL_9_STIG"}
+    rhel_versions = {
+        f["benchmark"].rpartition("/")[2]
+        for f in result["protect"]["findings"].values()
+        if f["benchmark"].startswith("RHEL_9_STIG/")
+    }
     assert rhel_versions == {"2"}
     assert any("build update 3" in n for n in result["notes"])
 
@@ -480,7 +498,7 @@ def test_defenses_for_technique__explicit_id_spanning_two_majors__says_so_withou
     # can carry different fix text for the same group id, are mixed in the answer.
     conn = _governed_kb(tmp_path, monkeypatch)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
-    versions = {f["stig_version"] for f in result["protect"]["findings"].values()}
+    versions = {f["benchmark"].rpartition("/")[2] for f in result["protect"]["findings"].values()}
     assert versions == {"1", "2"}
     assert any("exists at more than one major" in n and "drop benchmark_ids" in n for n in result["notes"])
     assert not any("Supply a build in the system description" in n for n in result["notes"])
@@ -1680,7 +1698,8 @@ def test_defenses_for_technique__t1078__carries_protect_and_detect_sections(kb_p
     assert [a["id"] for a in result["detect"]["analytics"]] == ["AN0001", "AN0002"]
     assert all(system["catalog"] == "disa" for system in result["resolved_systems"])
     assert result["protect"]["findings"]
-    assert all(finding["catalog"] == "disa" for finding in result["protect"]["findings"].values())
+    details = tools.finding_details(app_module.KnowledgeBase(kb_path), list(result["protect"]["findings"]))
+    assert all(finding["catalog"] == "disa" for finding in details["findings"])
     assert "description" not in result["protect"]["mitigations"][0]
 
 
