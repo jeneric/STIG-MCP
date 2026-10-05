@@ -1791,6 +1791,14 @@ def test_techniques_for_actor__include_defenses__counts_every_coverage_class_dis
     assert result["summary"]["detection"] == {"analytics": 10, "applicable": 7, "detectable": 2}
 
 
+def test_techniques_for_actor__include_defenses_without_log_sources__judges_no_technique_undetectable(defenses_kb):
+    with_telemetry = _apt29_coverage(defenses_kb, log_sources=_TELEMETRY)
+    undetectable = [t["technique_id"] for t in with_telemetry["techniques"] if "undetectable" in t["gaps"]]
+    assert undetectable
+    without = {t["technique_id"]: t["gaps"] for t in _apt29_coverage(defenses_kb)["techniques"]}
+    assert not any("undetectable" in without[technique_id] for technique_id in undetectable)
+
+
 def test_techniques_for_actor__include_defenses__each_technique_lists_its_defense_ids(defenses_kb):
     result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=_TELEMETRY)
     by_id = {t["technique_id"]: t for t in result["techniques"]}

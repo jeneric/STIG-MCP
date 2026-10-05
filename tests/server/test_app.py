@@ -696,3 +696,9 @@ def test_build_server__answer_tool_description__explains_enhancement_rules_and_v
     description = next(t.description for t in asyncio.run(server.list_tools()) if t.name == name)
     assert "enhancements" in description
     assert "via" in description
+
+
+def test_build_server__techniques_for_actor_description__names_the_filter_each_gap_needs(kb_path):
+    listed = asyncio.run(build_server(kb_path).list_tools())
+    description = " ".join(next(t.description for t in listed if t.name == "techniques_for_actor").split())
+    assert "undetectable log_sources" in description
