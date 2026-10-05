@@ -282,10 +282,11 @@ def _applicability_notes(hits):
 
 
 # Every named id becomes one bound SQL parameter in stigs_by_ids, and one scope pair per KB
-# VERSION of that id, which findings_for_control's outer query binds two parameters for. The
-# library currently ships at most 2 majors of any id (the deliberate vSphere dual-major
-# families), and nothing enforces that bound, so 200 ids is at most 400 pairs and 801
-# parameters, 804 with a severity filter, under the 999 that SQLite below 3.32 defaults to.
+# VERSION of that id, which findings_for_control's outer query binds two parameters for, on
+# top of five for the control and its enhancement prefix. The library currently ships at most
+# 2 majors of any id (the deliberate vSphere dual-major families), and nothing enforces that
+# bound, so 200 ids is at most 400 pairs and 805 parameters, 808 with a severity filter, under
+# the 999 that SQLite below 3.32 defaults to.
 # Raise the cap, or see a third major ship, and that arithmetic has to be redone, not just the
 # constant.
 #
@@ -624,6 +625,11 @@ class _ControlFindings:
         return self._rows[control_id]
 
 
+def _enhancement_number(control_id):
+    """So AC-2(3) sorts before AC-2(10), which a string sort reverses."""
+    return int(control_id[control_id.index("(") + 1 : -1])
+
+
 def _technique_controls(conn, technique_id, control_findings, findings):
     """One technique's controls and its own notes; adds each finding to `findings`."""
     controls = queries.effective_controls(conn, technique_id)
@@ -636,25 +642,35 @@ def _technique_controls(conn, technique_id, control_findings, findings):
     for control in controls:
         control_id = control["control_id"]
         rows = control_findings.rows(control_id)
+        via = {}
         for row in rows:
-            findings.setdefault(row["rule_id"], row)
-        listed.append(
-            {
-                "control_id": control_id,
-                "name": control["name"],
-                "family": control["family"],
-                "source": [control["source"]],
-                "rules": [row["rule_id"] for row in rows],
-            }
-        )
+            findings.setdefault(row["rule_id"], {key: value for key, value in row.items() if key != "via"})
+            for enhancement in row["via"]:
+                via.setdefault(enhancement, []).append(row["rule_id"])
+        entry = {
+            "control_id": control_id,
+            "name": control["name"],
+            "family": control["family"],
+            "source": [control["source"]],
+            "rules": [row["rule_id"] for row in rows],
+        }
+        if via:
+            entry["via"] = {key: via[key] for key in sorted(via, key=_enhancement_number)}
+        listed.append(entry)
     return listed, notes
 
 
 def _no_rules_note(control_ids, severities):
     levels = " or ".join(f"CAT {cat}" for cat in severities) + " " if severities else ""
     if len(control_ids) == 1:
-        return f"Control {control_ids[0]} has no {levels}rules in the resolved STIG(s)."
-    return f"{len(control_ids)} controls have no {levels}rules in the resolved STIG(s): {', '.join(control_ids)}."
+        return (
+            f"Control {control_ids[0]} has no {levels}rules, at the control or any of its enhancements, "
+            f"in the resolved STIG(s)."
+        )
+    return (
+        f"{len(control_ids)} controls have no {levels}rules, at the control or any of their enhancements, "
+        f"in the resolved STIG(s): {', '.join(control_ids)}."
+    )
 
 
 def _cat_ordered(findings):
@@ -737,7 +753,9 @@ def techniques_for_actor(kb, actor, system_description=None, stig_ids=None, incl
         for control in listed:
             for source in control["source"]:
                 technique["controls"].setdefault(source, []).append(control["control_id"])
-            controls.setdefault(control["control_id"], {k: control[k] for k in ("name", "family", "rules")})
+            controls.setdefault(
+                control["control_id"], {k: control[k] for k in ("name", "family", "rules", "via") if k in control}
+            )
     empty = sorted(control_id for control_id, control in controls.items() if not control["rules"])
     if scope and empty:
         notes.append(_no_rules_note(empty, severities))
