@@ -206,6 +206,12 @@ joined to a technique by a `detects` relationship, and names the count: that is 
 change to ATT&CK's data model looks like, and an unattended build must stop rather than
 publish empty tables. A spec version whose major is not 3 only warns.
 
+The ingest stores two log source names corrected: ATT&CK 19.2 spells `linux:syslog` as
+`linus:syslog` on AN0272 and as `linuxsyslog` on AN0364, so a caller collecting syslog would
+otherwise see those analytics as undetectable. Each correction names its analytic and the exact
+misspelling, so once ATT&CK fixes a name the correction no longer matches and does nothing.
+`defense_details` shows the corrected name for those two analytics.
+
 The knowledge base carries a schema version. The server starts against a knowledge base
 built by an older release, but never answers from it: it reports the outdated schema and
 tells you to re-run the ingest. Rebuilding is always the recovery: the knowledge base is

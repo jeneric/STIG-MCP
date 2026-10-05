@@ -294,6 +294,45 @@ def test_parse_attack__a_log_source_name_and_channel_with_trailing_whitespace__a
     ]
 
 
+def _bundle_with_log_source_names(tmp_path, renames):
+    """The fixture with analytics re-identified and their first log source renamed:
+    renames maps a fixture analytic id to (new analytic id, new log source name)."""
+    objects = json.loads(FIXTURE.read_text())["objects"]
+    for obj in objects:
+        refs = obj.get("external_references", [])
+        if obj.get("type") == "x-mitre-analytic" and refs and refs[0]["external_id"] in renames:
+            refs[0]["external_id"], obj["x_mitre_log_source_references"][0]["name"] = renames[refs[0]["external_id"]]
+    path = tmp_path / "bundle.json"
+    path.write_text(json.dumps({"objects": objects}))
+    return path
+
+
+def _first_source_names(path):
+    return {a.analytic_id: a.log_sources[0].name for a in parse_attack(path).analytics}
+
+
+def test_parse_attack__the_two_misspelled_syslog_names_in_attack_19_2__are_stored_as_linux_syslog(tmp_path):
+    path = _bundle_with_log_source_names(
+        tmp_path, {"AN0001": ("AN0272", "linus:syslog"), "AN0002": ("AN0364", "linuxsyslog")}
+    )
+    names = _first_source_names(path)
+    assert (names["AN0272"], names["AN0364"]) == ("linux:syslog", "linux:syslog")
+
+
+def test_parse_attack__a_misspelling_on_an_analytic_the_correction_does_not_name__is_left_alone(tmp_path):
+    path = _bundle_with_log_source_names(tmp_path, {"AN0001": ("AN0001", "linus:syslog")})
+    assert _first_source_names(path)["AN0001"] == "linus:syslog"
+
+
+def test_parse_attack__a_corrected_analytic_once_attack_fixes_the_name__keeps_every_name_as_attack_wrote_it(
+    tmp_path,
+):
+    # The fixture's AN0002 has a second log source, which the correction must not touch either.
+    path = _bundle_with_log_source_names(tmp_path, {"AN0002": ("AN0272", "linux:syslog")})
+    an0272 = next(a for a in parse_attack(path).analytics if a.analytic_id == "AN0272")
+    assert [s.name for s in an0272.log_sources] == ["linux:syslog", "auditd:EXECVE"]
+
+
 def test_parse_attack__deprecated_or_non_m_course_of_action__is_skipped_and_counted_at_debug(caplog):
     with caplog.at_level(logging.DEBUG, logger="stig_mcp.ingest.attack_parser"):
         data = parse_attack(FIXTURE)

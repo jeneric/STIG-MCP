@@ -3,6 +3,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 
 logger = logging.getLogger(__name__)
 
@@ -241,18 +242,35 @@ def _live(obj):
     return not obj.get("revoked") and not obj.get("x_mitre_deprecated")
 
 
+# ATT&CK 19.2 misspells linux:syslog on one analytic each, so a caller collecting it would see
+# those analytics as undetectable. Keyed on the analytic so a fixed upstream name, or the same
+# typo appearing elsewhere, passes through untouched.
+_LOG_SOURCE_TYPOS = MappingProxyType(
+    {
+        ("AN0272", "linus:syslog"): "linux:syslog",
+        ("AN0364", "linuxsyslog"): "linux:syslog",
+    }
+)
+
+
+def _source_name(analytic_id, ref):
+    name = (ref.get("name") or "").strip()
+    return _LOG_SOURCE_TYPOS.get((analytic_id, name), name)
+
+
 def _analytic_from(obj, strategy_id, component_by_stix):
+    analytic_id = _attack_id(obj)
     sources = [
         # Stripped as tools._check_list strips the caller's names; ATT&CK 19.2 ships 'firmware:integrity '.
         LogSource(
-            (ref.get("name") or "").strip(),
+            _source_name(analytic_id, ref),
             (ref.get("channel") or "").strip(),
             component_by_stix.get(ref.get("x_mitre_data_component_ref")),
         )
         for ref in obj.get("x_mitre_log_source_references", [])
     ]
     return Analytic(
-        _attack_id(obj),
+        analytic_id,
         strategy_id,
         obj.get("name", ""),
         obj.get("description", ""),
