@@ -120,22 +120,22 @@ def _register_answer_tools(server, kb):
         ATT&CK mapping names base controls; via, when present, maps each enhancement to the rules that reach
         the control only through it. Each finding gives its benchmark (stig_id/version, described in
         resolved_systems), V- id, CAT and title; call finding_details with rule ids or V- ids for DISA's check
-        and fix text and the CCIs. severity narrows findings to CAT levels, e.g. ["I"]. A technique id
-        ATT&CK has revoked (e.g. T1562) is answered for its replacement, and the response reports the
-        redirect in technique.redirected_from. Include the product build in system_description where one
-        exists (e.g. 'ESXi 8.0 U3'): some products ship two STIG versions with different remediations, and the
-        build selects the one that applies. benchmark_ids narrows to benchmarks you already know and accepts
-        at most 200; to scope a system you cannot name, pass system_description instead and let the resolver
-        do it. If the knowledge base is not built yet this returns {"status": "not_ready"} with the commands
-        to run, rather than an error. platforms marks each detection analytic applicable or not for the ATT&CK
-        platforms you name, e.g. ["Windows"]; an unknown name is refused with the full list. log_sources names
-        the telemetry you collect, with ATT&CK's log source names, in any case (e.g. ["WinEventLog:Security",
-        "WinEventLog:Sysmon"]); log_sources takes up to 100 names. Each analytic is then marked detectable
-        only when every log source it needs is in the list. detect.analytics maps each analytic id to its name
-        and platforms; detect.applicable and detect.detectable list the qualifying ids and are present only when
-        platforms or log_sources was given (absent: not judged; empty: none qualify). Mitigations are listed by
-        id and name only: call defense_details with M-, DET- or AN- ids for MITRE's text, log sources and tunable
-        elements."""
+        and fix text and the CCIs. severity narrows findings to CAT levels, e.g. ["I"]. A technique id ATT&CK
+        has revoked (e.g. T1562) is answered for its replacement, and the response reports the redirect in
+        technique.redirected_from. Include the product build in system_description where one exists (e.g.
+        'ESXi 8.0 U3'): some products ship two STIG versions with different remediations, and the build
+        selects the one that applies. benchmark_ids narrows to benchmarks you already know and accepts
+        at most 200; to scope a system you cannot name, pass system_description instead and let the resolver do it. If
+        the knowledge base is not built yet this returns {"status": "not_ready"} with the commands to run,
+        rather than an error. platforms names ATT&CK platforms, e.g. ["Windows"], and detect.applicable then
+        lists the analytics that apply to them; an unknown name is refused with the full list. log_sources
+        names the telemetry you collect, with ATT&CK's log source names, in any case (e.g.
+        ["WinEventLog:Security", "WinEventLog:Sysmon"]); log_sources takes up to 100 names. detect.detectable
+        then lists the analytics whose every log source is in the list. detect.analytics maps each analytic id
+        to its name and platforms; detect.applicable and detect.detectable list the qualifying ids and are
+        present only when platforms or log_sources was given (absent: not judged; empty: none qualify).
+        Mitigations are listed by id and name only: call defense_details with M-, DET- or AN- ids for MITRE's
+        text, log sources and tunable elements."""
         with _guidance_reaches_the_caller():
             return _compact(
                 tools.defenses_for_technique(
@@ -184,11 +184,10 @@ def _register_actor_tool(server, kb):
         when a system was scoped; with severity, no rules at the requested CAT levels),
         without_applicable_analytic (only with platforms), detectable and undetectable (only with
         log_sources); summary.detection counts analytics instead. Detection is judged applicability first when
-        platforms is given, then detectability over the applicable analytics. platforms marks each analytic
-        applicable or not, and log_sources marks it detectable or not, as in defenses_for_technique;
-        log_sources takes up to 100 names. Call defense_details with M-, DET- or AN- ids for MITRE's text. If
-        the knowledge base is not built yet this returns {"status": "not_ready"} with the commands to run,
-        rather than an error."""
+        platforms is given, then detectability over the applicable analytics. Each technique's applicable and
+        detectable id lists are judged as in defenses_for_technique; log_sources takes up to 100 names. Call
+        defense_details with M-, DET- or AN- ids for MITRE's text. If the knowledge base is not built yet this
+        returns {"status": "not_ready"} with the commands to run, rather than an error."""
         with _guidance_reaches_the_caller():
             return _compact(
                 tools.techniques_for_actor(
