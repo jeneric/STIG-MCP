@@ -96,14 +96,17 @@ none qualify. `summary` counts the mitigations and the analytics before `cat_i`,
 many are applicable and detectable when you passed the matching filter.
 
 With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, with
-`analytics` as the same id-to-platforms map plus `applicable` and `detectable` id lists, a
-top-level `mitigations` map naming each M-id once, and a `coverage` block to `summary`,
-placed right before `cat_i`, ahead of the mitigation and detection counts.
-`summary.mitigations` there counts references across techniques, so a mitigation on two
-techniques counts twice, and `summary.detection` counts analytics, while `coverage` counts
-techniques. Each technique also carries `gaps`, the names of the coverage classes below
-that it falls in, in the order listed; `detectable` is not a gap, so a technique with
-nothing missing has an empty list. `coverage` holds:
+`analytics` as an id-to-platforms map (without the names `defenses_for_technique` gives)
+plus `applicable` and `detectable` id lists, a top-level `mitigations` map naming each
+M-id once, and a `coverage` block to `summary`, placed right before `cat_i`, ahead of the
+mitigation and detection counts. `summary.mitigations` there counts references across
+techniques, so a mitigation on two techniques counts twice, and `summary.detection` counts
+analytics, while `coverage` counts techniques. Each technique also carries `gaps`, the
+names of the coverage classes below that it falls in, in the order listed; `detectable` is
+not a gap, so a technique with nothing missing has an empty list. `coverage` holds:
+`detectable` ignores applicability: it lists every analytic whose log sources you collect,
+so it can name an analytic that is not in `applicable`, while `gaps` and `coverage` judge
+detectability over the applicable analytics only.
 
 - `techniques`: how many the actor uses.
 - `without_mitigation`: techniques ATT&CK offers no mitigation for.
@@ -148,7 +151,7 @@ not.
 ### Why is an analytic not detectable when I collect its log?
 
 Because it needs more than one. An analytic that correlates `WinEventLog:Security` with
-`WinEventLog:Sysmon` is marked detectable only when both are in `log_sources`. Call
+`WinEventLog:Sysmon` is listed in `detectable` only when both are in `log_sources`. Call
 `defense_details` on the AN-id to see every log source it names.
 
 ## Getting the LLM to use the server
@@ -457,30 +460,31 @@ filter them, because there is only one STIG to select.
 ### Why doesn't the answer include the check and fix steps?
 
 Because the answers would be too big to read. DISA's check and fix text is most of every
-finding, and an actor's techniques share most of their findings, so an answer carrying
-all of it would run to megabytes. VS Code's Copilot agent currently saves any tool result
-over 8 KB to a temporary file and shows the model only its first 500 characters; Claude
-Code saves any text result over 50,000 characters to a file. A model then reads the file in pieces and tends
-to summarize, which is how a list of CAT I findings comes back incomplete.
+finding, and an actor's techniques share most of their findings, so an answer carrying all
+of it would run to megabytes. VS Code's Copilot agent currently saves any tool result over
+8 KB to a temporary file and shows the model only its first 500 characters; Claude Code
+saves any text result over 50,000 characters to a file. A model then reads the file in
+pieces and tends to summarize, which is how a list of CAT I findings comes back
+incomplete.
 
-So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON
-that lists each finding once, by benchmark, V- id, CAT and title, and opens with `summary`: the
-number of rules found, the number at each CAT, `control_counts` (how many controls map
-and how many have rules in the resolved STIGs, counting rules tagged to a control's
+So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON that
+lists each finding once, by benchmark, V- id, CAT and title, and opens with `summary`: the
+number of rules found, the number at each CAT, `control_counts` (how many controls map and
+how many have rules in the resolved STIGs, counting rules tagged to a control's
 enhancements), the mitigation and detection counts, `cat_i` (the CAT I V- ids with their
 count) and, last, the ids of the controls that have rules. `techniques_for_actor` also
 counts the techniques, and with `include_defenses` puts `coverage` ahead of the mitigation
-and detection counts, so the gap counts sit inside the preview too.
-The counts come first so they fall inside that preview, and they spare the model counting
-long lists itself, which it gets wrong. How many CAT I ids also fit depends on the client:
-Copilot may reformat the answer before saving it, so rely on `cat_i.count` to tell whether
-the ids in view are all of them. That count is of V- ids, not rules: a requirement held at
-two majors, as vSphere 8.0's are, is one V- id and two rules.
+and detection counts, so the gap counts sit inside the preview too. The counts come first
+so they fall inside that preview, and they spare the model counting long lists itself,
+which it gets wrong. How many CAT I ids also fit depends on the client: Copilot may
+reformat the answer before saving it, so rely on `cat_i.count` to tell whether the ids in
+view are all of them. That count is of V- ids, not rules: a requirement held at two
+majors, as vSphere 8.0's are, is one V- id and two rules.
 
 Ask for the steps of the findings you care about and the model calls `finding_details`,
-which returns DISA's exact check and fix text, and the CCIs, for up to 50 rule ids or V- ids at a time.
-A V- id that two benchmarks or two majors share returns every match, each labeled with its
-benchmark.
+which returns DISA's exact check and fix text, and the CCIs, for up to 50 rule ids or V-
+ids at a time. A V- id that two benchmarks or two majors share returns every match, each
+labeled with its benchmark.
 
 In `techniques_for_actor` with `include_defenses`, each technique names its controls
 grouped by where the mapping came from (`ctid` or `override`), `controls` lists each
