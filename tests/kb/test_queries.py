@@ -80,6 +80,53 @@ def test_findings_for_control__more_findings__does_not_cost_more_queries(cci_bat
     assert measure([("A_STIG", "1"), ("B_STIG", "1")]) == (5, 2)
 
 
+_E_V1 = [("E_STIG", "1")]
+
+
+def _rules_and_via(findings):
+    return [(f["rule_id"], f["via"]) for f in findings]
+
+
+def test_findings_for_control__rules_tagged_to_enhancements__count_for_the_base_once_each(enhancement_kb):
+    # E_TWO_ENH reaches AC-2 through two enhancements and must come back once; E_BOTH cites the
+    # base itself, so it is base-level and carries no via.
+    findings = queries.findings_for_control(enhancement_kb, "AC-2", _E_V1)
+    assert _rules_and_via(findings) == [
+        ("E_BASE", []),
+        ("E_BOTH", []),
+        ("E_TWO_ENH", ["AC-2(1)", "AC-2(3)"]),
+        ("E_ONE_ENH", ["AC-2(3)"]),
+    ]
+
+
+def test_findings_for_control__near_miss_id__is_not_an_enhancement(enhancement_kb):
+    rule_ids = [f["rule_id"] for f in queries.findings_for_control(enhancement_kb, "AC-2", _E_V1)]
+    assert "E_NEAR" not in rule_ids
+    assert "E_OTHER" not in rule_ids
+
+
+def test_findings_for_control__kb_without_parent_links__still_rolls_up(enhancement_kb):
+    linked = enhancement_kb.execute("SELECT COUNT(*) FROM controls WHERE parent_control_id IS NOT NULL").fetchone()[0]
+    assert linked == 0
+    assert "E_ONE_ENH" in [f["rule_id"] for f in queries.findings_for_control(enhancement_kb, "AC-2", _E_V1)]
+
+
+def test_findings_for_control__enhancement_id_as_the_control__matches_only_itself(enhancement_kb):
+    findings = queries.findings_for_control(enhancement_kb, "AC-2(1)", _E_V1)
+    assert _rules_and_via(findings) == [("E_BOTH", []), ("E_TWO_ENH", [])]
+
+
+def test_findings_for_control__severity_filter__applies_to_enhancement_rules(enhancement_kb):
+    findings = queries.findings_for_control(enhancement_kb, "AC-2", _E_V1, severities=["II"])
+    assert _rules_and_via(findings) == [("E_ONE_ENH", ["AC-2(3)"])]
+
+
+def test_findings_for_control__scope_with_second_major__adds_its_enhancement_rules(enhancement_kb):
+    findings = queries.findings_for_control(enhancement_kb, "AC-2", [("E_STIG", "1"), ("E_STIG", "2")])
+    assert [f["rule_id"] for f in findings] == ["E_BASE", "E_BOTH", "E_TWO_ENH", "E_V2_ENH", "E_ONE_ENH"]
+    assert findings[3]["via"] == ["AC-2(1)"]
+
+
 def test_ccis_by_rule__real_rules_on_both_sides_of_a_chunk_boundary__none_lost_or_doubled(cci_batch_kb):
     # Two properties in one test: the parameter ceiling and chunk-boundary correctness.
     #

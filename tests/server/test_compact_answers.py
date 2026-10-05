@@ -77,7 +77,9 @@ def two_benchmark_rules_db(tmp_path):
 def test_findings_for_control__any_finding__carries_no_text_or_benchmark_details(kb_conn):
     findings = queries.findings_for_control(kb_conn, "AC-2", [("TEST_STIG", "1")])
     assert findings
-    assert all(set(f) == _LIST_FINDING_KEYS for f in findings)
+    # via is the row's internal record of the enhancements a rule came through; the answer
+    # strips it from findings, as the next test pins.
+    assert all(set(f) == _LIST_FINDING_KEYS | {"via"} for f in findings)
 
 
 def test_findings_for_control__severity_filter__keeps_only_those_cats(mixed_kb):
@@ -137,18 +139,21 @@ def test_defenses_for_technique__summary__comes_first_and_counts_by_cat(mixed_kb
     assert result["summary"] == {
         "findings": 4,
         "by_cat": {"I": 2, "II": 1, "III": 1},
-        "control_counts": {"mapped": 3, "with_rules": 1},
+        "control_counts": {"mapped": 3, "with_rules": 2},
         "cat_i": {"count": 2, "ids": ["V-770002", "V-100001"]},
         "mitigations": 2,
         "detection": {"analytics": 2},
-        "controls_with_rules": ["AC-2(1)"],
+        "controls_with_rules": ["AC-2", "AC-2(1)"],
     }
 
 
 def test_defenses_for_technique__severity_i__returns_only_cat_i_and_says_what_was_filtered(mixed_kb):
     result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"], severity=["I"])
     assert [f["group_id"] for f in result["protect"]["findings"].values()] == ["V-770002"]
-    assert "Control AC-2 has no CAT I rules in the resolved STIG(s)." in result["notes"]
+    assert (
+        "Control AC-6 has no CAT I rules, at the control or any of its enhancements, in the resolved STIG(s)."
+        in result["notes"]
+    )
 
 
 @pytest.mark.parametrize("severity", [[], ["IV"], ["high"], ["i"]])
@@ -169,6 +174,56 @@ def test_techniques_for_actor__overlapping_techniques__list_a_shared_finding_onc
     assert by_technique["T1078.001"] == {"override": ["AC-2(1)"]}
     assert "AC-2(1)" in by_technique["T1078"]["ctid"]
     assert all("findings" not in t for t in result["techniques"])
+
+
+def test_defenses_for_technique__rule_tagged_to_an_enhancement__counts_for_the_base_with_via(mixed_kb):
+    # The fixture's RHEL 9 rule cites CCI-000015, which DISA maps to AC-2(1) only; CTID maps
+    # T1078 to AC-2.
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
+    by_id = {c["control_id"]: c for c in result["protect"]["controls"]}
+    assert by_id["AC-2"]["rules"] == ["SV-100001r1_rule"]
+    assert by_id["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
+    assert "via" not in by_id["AC-2(1)"]
+    assert list(result["protect"]["findings"]) == ["SV-100001r1_rule"]
+    assert all(set(f) == _LIST_FINDING_KEYS for f in result["protect"]["findings"].values())
+
+
+def test_techniques_for_actor__rule_tagged_to_an_enhancement__control_carries_via(mixed_kb):
+    kb = _with_second_technique(mixed_kb)
+    result = tools.techniques_for_actor(kb, "APT29", benchmark_ids=["RHEL_9_STIG"], include_defenses=True)
+    assert result["controls"]["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
+    assert "via" not in result["controls"]["AC-2(1)"]
+    assert list(result["findings"]) == ["SV-100001r1_rule"]
+
+
+@pytest.fixture
+def rows_with_via(monkeypatch):
+    """AC-2 rows reaching it through AC-2(10) and AC-2(3), with AC-2(10) met first, so both
+    insertion order and a string sort put (10) first; plus a base-level rule that must stay
+    out of via."""
+    rows = [
+        {**_finding("SV-1r1_rule", "I"), "via": []},
+        {**_finding("SV-2r1_rule", "I"), "via": ["AC-2(10)"]},
+        {**_finding("SV-3r1_rule", "II"), "via": ["AC-2(3)", "AC-2(10)"]},
+    ]
+    monkeypatch.setattr(queries, "findings_for_control", lambda conn, cid, *rest: rows if cid == "AC-2" else [])
+    return rows
+
+
+def test_defenses_for_technique__via_keys__ordered_by_enhancement_number(kb_path, rows_with_via):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    ac2 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2")
+    assert list(ac2["via"]) == ["AC-2(3)", "AC-2(10)"]
+    assert ac2["via"] == {"AC-2(3)": ["SV-3r1_rule"], "AC-2(10)": ["SV-2r1_rule", "SV-3r1_rule"]}
+
+
+def test_techniques_for_actor__rows_shared_across_techniques__are_not_mutated(kb_path, rows_with_via):
+    # _ControlFindings hands the same row dicts to every technique mapping a control; stripping
+    # via in place would empty it for the next one.
+    tools.techniques_for_actor(
+        app_module.KnowledgeBase(kb_path), "APT29", benchmark_ids=["RHEL_9_STIG"], include_defenses=True
+    )
+    assert [row["via"] for row in rows_with_via] == [[], ["AC-2(10)"], ["AC-2(3)", "AC-2(10)"]]
 
 
 def test_techniques_for_actor__include_defenses__summary_comes_first(mixed_kb):
@@ -200,14 +255,20 @@ def test_techniques_for_actor__each_control__is_queried_once_however_many_techni
 def test_techniques_for_actor__controls_without_rules__are_named_in_one_note(mixed_kb):
     kb = _with_second_technique(mixed_kb)
     result = tools.techniques_for_actor(kb, "APT29", benchmark_ids=["RHEL_9_STIG"], include_defenses=True)
-    assert "2 controls have no rules in the resolved STIG(s): AC-2, AC-6." in result["notes"]
+    assert (
+        "Control AC-6 has no rules, at the control or any of its enhancements, in the resolved STIG(s)."
+        in result["notes"]
+    )
     assert not any("has no" in n or "have no" in n for t in result["techniques"] for n in t["notes"])
 
 
 def test_defenses_for_technique__control_without_rules__keeps_its_own_note(mixed_kb):
     result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
-    assert "Control AC-2 has no rules in the resolved STIG(s)." in result["notes"]
-    assert "Control AC-6 has no rules in the resolved STIG(s)." in result["notes"]
+    assert (
+        "Control AC-6 has no rules, at the control or any of its enhancements, in the resolved STIG(s)."
+        in result["notes"]
+    )
+    assert not any("AC-2 " in note for note in result["notes"])
 
 
 def test_techniques_for_actor__severity_filter__applies_to_every_technique(mixed_kb):
@@ -230,9 +291,9 @@ def test_techniques_for_actor__include_defenses__counts_techniques_and_distinct_
     summary = result["summary"]
     assert list(summary)[:2] == ["techniques", "findings"]
     assert summary["techniques"] == 2
-    assert summary["control_counts"] == {"mapped": len(result["controls"]), "with_rules": 1}
+    assert summary["control_counts"] == {"mapped": len(result["controls"]), "with_rules": 2}
     assert summary["control_counts"]["mapped"] == 3
-    assert summary["controls_with_rules"] == ["AC-2(1)"]
+    assert summary["controls_with_rules"] == ["AC-2", "AC-2(1)"]
 
 
 # finding_details
@@ -295,6 +356,7 @@ def _finding(rule_id, cat, stig_id="A_STIG", group_id=None):
         "severity": {"cat": cat, "level": "x"},
         "title": rule_id,
         "ccis": [],
+        "via": [],
     }
 
 

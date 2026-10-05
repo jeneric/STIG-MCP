@@ -105,21 +105,31 @@ def findings_for_control(conn, control_id, scope, severities=None):
     # Only bound "?" markers are interpolated; the stig_id, version and CAT values are
     # parameters, and _CAT_ORDER is a trusted module constant, so this is not injectable.
     placeholders = ",".join("(?,?)" for _ in scope)
-    params = [control_id]
+    # CTID maps base controls and DISA often tags an enhancement, so a control's rules include
+    # those under `<control>(`. The id prefix, not parent_control_id, because a KB built
+    # without the NIST catalog has no parent links.
+    prefix = f"{control_id}("
+    params = [control_id, control_id, control_id, len(prefix), prefix]
     for stig_id, version in scope:
         params += [stig_id, version]
     severity_clause = ""
     if severities:
         severity_clause = f"AND r.severity_cat IN ({','.join('?' for _ in severities)})"
         params += list(severities)
+    # GROUP BY rather than DISTINCT: one rule reached through several CCIs or enhancements is
+    # one row, and the matched enhancement ids aggregate into it.
     rows = conn.execute(
         f"""
-        SELECT DISTINCT r.rule_id, r.group_id, r.stig_id, r.stig_version,
-               r.severity_cat, r.severity_level, r.title
+        SELECT r.rule_id, r.group_id, r.stig_id, r.stig_version,
+               r.severity_cat, r.severity_level, r.title,
+               MAX(cc.control_id = ?) AS cites_control,
+               GROUP_CONCAT(DISTINCT CASE WHEN cc.control_id <> ? THEN cc.control_id END) AS enhancements
         FROM cci_control cc
         JOIN rule_cci rc ON rc.cci_id = cc.cci_id
         JOIN stig_rules r ON r.rule_id = rc.rule_id
-        WHERE cc.control_id = ? AND (r.stig_id, r.stig_version) IN (VALUES {placeholders}) {severity_clause}
+        WHERE (cc.control_id = ? OR substr(cc.control_id, 1, ?) = ?)
+          AND (r.stig_id, r.stig_version) IN (VALUES {placeholders}) {severity_clause}
+        GROUP BY r.rule_id, r.group_id, r.stig_id, r.stig_version, r.severity_cat, r.severity_level, r.title
         ORDER BY {_CAT_ORDER}, r.stig_id, r.stig_version, r.rule_id
         """,  # noqa: S608
         params,
@@ -135,6 +145,7 @@ def findings_for_control(conn, control_id, scope, severities=None):
             "severity": {"cat": r["severity_cat"], "level": r["severity_level"]},
             "title": r["title"],
             "ccis": ccis_by_rule.get(r["rule_id"], []),
+            "via": [] if r["cites_control"] else sorted(r["enhancements"].split(",")),
         }
         for r in rows
     ]

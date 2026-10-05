@@ -688,3 +688,11 @@ def test_build_server__techniques_for_actor_tool__forwards_platforms_and_log_sou
     )
     assert payload["summary"]["coverage"]["detectable"] == 1
     assert payload["summary"]["coverage"]["without_applicable_analytic"] == 1
+
+
+@pytest.mark.parametrize("name", ["defenses_for_technique", "techniques_for_actor"])
+def test_build_server__answer_tool_description__explains_enhancement_rules_and_via(kb_path, name):
+    server = build_server(kb_path)
+    description = next(t.description for t in asyncio.run(server.list_tools()) if t.name == name)
+    assert "enhancements" in description
+    assert "via" in description

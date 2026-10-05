@@ -111,7 +111,7 @@ def test_defenses_for_technique__repeated_unknown_stig_id__keeps_it_once(kb_path
 
 def test_defenses_for_technique__benchmark_ids_none_of_which_exist__explains_once_without_per_control_noise(kb_path):
     # When every named stig_id is unknown, scope is empty, so the caller already gets one
-    # explicit note per unknown id (asserted below). A "Control X has no rules in the
+    # explicit note per unknown id (asserted below). A "Control X has no rules, ... in the
     # resolved STIG(s)" note on top of that, once per control, would repeat the same fact
     # the unknown-id note already gave: deliberately absent, do not add it back.
     conn = open_db_for_test(kb_path)
@@ -119,7 +119,7 @@ def test_defenses_for_technique__benchmark_ids_none_of_which_exist__explains_onc
     entry = next(s for s in result["resolved_systems"] if s["stig_id"] == "NOPE_STIG")
     assert entry["title"] is None and entry["high_confidence"] is False
     assert any("NOPE_STIG" in note and "list_stigs" in note for note in result["notes"])
-    assert not any("no rules in the resolved" in note for note in result["notes"])
+    assert not any("has no" in note for note in result["notes"])
 
 
 def test_defenses_for_technique__id_with_two_majors__lists_every_version(tmp_path):
@@ -1063,7 +1063,7 @@ def test_the_cap__both_queries_it_sizes__stay_under_the_sqlite_variable_floor(kb
     call raised).
 
     999 is SQLITE_LIMIT_VARIABLE_NUMBER's compile-time default below SQLite 3.32. Both queries
-    the cap sizes are covered: findings_for_control binds `1 + 2 * len(scope)`, and scope holds
+    the cap sizes are covered: findings_for_control binds `5 + 2 * len(scope)`, and scope holds
     one pair per knowledge-base VERSION of each named id, at most 2 on the real corpus;
     stigs_by_ids binds one per id, unchunked.
 
@@ -1074,7 +1074,7 @@ def test_the_cap__both_queries_it_sizes__stay_under_the_sqlite_variable_floor(kb
     scope = [(f"FILLER_{i}_STIG", "1") for i in range(2 * tools._MAX_BENCHMARK_IDS)]
     ids = [f"FILLER_{i}_STIG" for i in range(tools._MAX_BENCHMARK_IDS)]
     for call, params in (
-        (lambda conn: queries.findings_for_control(conn, "AC-2(1)", scope), 1 + 2 * len(scope)),
+        (lambda conn: queries.findings_for_control(conn, "AC-2(1)", scope), 5 + 2 * len(scope)),
         (lambda conn: queries.stigs_by_ids(conn, ids), len(ids)),
     ):
         assert params < 999, params
