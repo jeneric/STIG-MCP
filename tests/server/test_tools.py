@@ -1783,8 +1783,9 @@ def test_techniques_for_actor__include_defenses__counts_every_coverage_class_dis
         "undetectable": 5,
     }
     keys = list(result["summary"])
-    # coverage leads the new counts so the gap counts land inside a client's preview.
-    assert keys.index("cat_i") < keys.index("coverage") < keys.index("mitigations") < keys.index("detection")
+    # Every count comes before cat_i so it lands inside a client's preview.
+    assert keys.index("control_counts") < keys.index("coverage") < keys.index("mitigations")
+    assert keys.index("mitigations") < keys.index("detection") < keys.index("cat_i")
     assert keys[-1] == "controls_with_rules"
     assert result["summary"]["mitigations"] == 6
     assert result["summary"]["detection"] == {"analytics": 10, "applicable": 7, "detectable": 2}

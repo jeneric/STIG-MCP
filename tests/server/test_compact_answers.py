@@ -131,9 +131,9 @@ def test_defenses_for_technique__summary__comes_first_and_counts_by_cat(mixed_kb
         "findings",
         "by_cat",
         "control_counts",
-        "cat_i",
         "mitigations",
         "detection",
+        "cat_i",
         "controls_with_rules",
     ]
     assert result["summary"] == {
@@ -461,19 +461,19 @@ def test_build_server__finding_details_description__asks_to_quote_disa_and_label
     assert "label anything you add" in description
 
 
-def _cat_i_end(result):
+def _counts_end(result):
+    # Every count precedes the CAT I id list, whose length the reader checks against cat_i.count.
     text = app_module._compact(result).text
-    start = text.index('"cat_i":')
-    return text.index("]}", start) + 2
+    return text.index('"ids":', text.index('"cat_i":'))
 
 
 _PREVIEW = 500
 
 
 @pytest.mark.parametrize("fixture_name", ["kb_path", "wide_kb"])
-def test_compact_answers__cat_i__closes_inside_the_preview_window(request, fixture_name):
-    # A spilling client shows the model the first ~500 characters. Every new summary count goes
-    # after cat_i so this position does not move; the real-data number is in the plan.
+def test_compact_answers__every_count__closes_inside_the_preview_window(request, fixture_name):
+    # A spilling client shows the model the first ~500 characters; the real-data numbers are
+    # in the plan.
     kb = app_module.KnowledgeBase(request.getfixturevalue(fixture_name))
     technique = tools.defenses_for_technique(kb, "T1078", system_description="RHEL 9", platforms=["Windows"])
     actor = tools.techniques_for_actor(
@@ -484,5 +484,5 @@ def test_compact_answers__cat_i__closes_inside_the_preview_window(request, fixtu
         platforms=["Windows"],
         log_sources=["WinEventLog:Security"],
     )
-    assert _cat_i_end(technique) < _PREVIEW
-    assert _cat_i_end(actor) < _PREVIEW
+    assert _counts_end(technique) < _PREVIEW
+    assert _counts_end(actor) < _PREVIEW

@@ -82,18 +82,19 @@ get MITRE's text about a mitigation on that particular technique, as
 
 Two optional filters mark up the Detect side; neither removes an analytic from the answer.
 `platforms` lists ATT&CK platform names (`["Windows"]`); each analytic is then marked
-`applicable` or not, and an unknown name is refused with the full list. `log_sources` lists
-the telemetry you collect, using ATT&CK's log source names exactly as `defense_details`
-prints them; `log_sources` takes up to 100 names, and an unknown one is refused naming
-the closest matches. An analytic is `detectable` only when every log source it needs is in
-your list; one that names no log source at all is never detectable. Channels are not
-compared: naming a log asserts you collect it, and the analytic's channel says which events
-within it matter. `summary` counts the mitigations and the analytics after `cat_i`, with
-how many are applicable and detectable when you passed the matching filter.
+`applicable` or not, and an unknown name is refused with the full list. `log_sources`
+lists the telemetry you collect, using ATT&CK's log source names exactly as
+`defense_details` prints them; `log_sources` takes up to 100 names, and an unknown one is
+refused naming the closest matches. An analytic is `detectable` only when every log source
+it needs is in your list; one that names no log source at all is never detectable.
+Channels are not compared: naming a log asserts you collect it, and the analytic's channel
+says which events within it matter. `summary` counts the mitigations and the analytics
+before `cat_i`, with how many are applicable and detectable when you passed the matching
+filter.
 
 With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, a
 top-level `mitigations` map naming each M-id once, and a `coverage` block to `summary`,
-placed right after `cat_i` and before the mitigation and detection counts.
+placed right before `cat_i`, ahead of the mitigation and detection counts.
 `summary.mitigations` there counts references across techniques, so a mitigation on two
 techniques counts twice, and `summary.detection` counts analytics, while `coverage` counts
 techniques. Each technique also carries `gaps`, the names of the coverage classes below
@@ -462,10 +463,10 @@ So `defenses_for_technique` and `techniques_for_actor` send one line of compact 
 that lists each finding once, by id, severity and title, and opens with `summary`: the
 number of rules found, the number at each CAT, `control_counts` (how many controls map
 and how many have rules in the resolved STIGs, counting rules tagged to a control's
-enhancements), `cat_i` (the CAT I V- ids with their count), then the mitigation and
-detection counts, and, last, the ids of the controls that have rules. `techniques_for_actor`
-also counts the techniques, and with `include_defenses` puts `coverage` first among the new
-counts, right after `cat_i`, so the gap counts sit inside the preview too.
+enhancements), the mitigation and detection counts, `cat_i` (the CAT I V- ids with their
+count) and, last, the ids of the controls that have rules. `techniques_for_actor` also
+counts the techniques, and with `include_defenses` puts `coverage` ahead of the mitigation
+and detection counts, so the gap counts sit inside the preview too.
 The counts come first so they fall inside that preview, and they spare the model counting
 long lists itself, which it gets wrong. How many CAT I ids also fit depends on the client:
 Copilot may reformat the answer before saving it, so rely on `cat_i.count` to tell whether

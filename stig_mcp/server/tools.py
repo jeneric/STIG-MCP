@@ -758,7 +758,7 @@ def _cat_ordered(findings):
     return {f["rule_id"]: f for f in ordered}
 
 
-def _summary(findings, rules_by_control, after_cat_i=None):
+def _summary(findings, rules_by_control, defense_counts=None):
     """Counts and the CAT I ids, first in the answer: a client that spills a large result to a
     file shows the model only its opening characters. Stating the counts also spares the model
     counting long lists itself, which it gets wrong."""
@@ -770,15 +770,15 @@ def _summary(findings, rules_by_control, after_cat_i=None):
     cat_i_findings = (f for f in findings.values() if f["severity"]["cat"] == "I")
     cat_i = list(dict.fromkeys(f["group_id"] or f["rule_id"] for f in cat_i_findings))
     with_rules = [control_id for control_id, rules in rules_by_control.items() if rules]
-    # The counts come before cat_i; the control id list goes after it, since a long one would
-    # push the CAT I ids out of that opening.
+    # The control id list goes last, since a long one would push the CAT I ids out of that
+    # opening.
     return {
         "findings": len(findings),
         "by_cat": by_cat,
         "control_counts": {"mapped": len(rules_by_control), "with_rules": len(with_rules)},
+        # Every count goes before cat_i, whose id list can run past a client's preview.
+        **(defense_counts or {}),
         "cat_i": {"count": len(cat_i), "ids": cat_i},
-        # New counts sit here, after cat_i, so the CAT I ids keep their place in a client's preview.
-        **(after_cat_i or {}),
         "controls_with_rules": with_rules,
     }
 
@@ -858,7 +858,6 @@ def _actor_defense_summary(rows, detections, scoped, platforms, log_sources):
         platforms,
         log_sources,
     )
-    # coverage first: the gap counts then fall inside a client's preview of the answer.
     return {"coverage": _coverage(rows, scoped, platforms, log_sources), **totals}
 
 
@@ -943,12 +942,14 @@ def techniques_for_actor(  # noqa: PLR0913
     if scope and empty:
         notes.append(_no_rules_note(empty, severities))
     findings = _cat_ordered(findings)
-    after_cat_i = _actor_defense_summary(rows, detections, *filters)
+    defense_counts = _actor_defense_summary(rows, detections, *filters)
     return {
         "summary": {
             "techniques": len(techniques),
             **_summary(
-                findings, {control_id: control["rules"] for control_id, control in controls.items()}, after_cat_i
+                findings,
+                {control_id: control["rules"] for control_id, control in controls.items()},
+                defense_counts,
             ),
         },
         "actor": resolved,
