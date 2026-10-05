@@ -115,7 +115,8 @@ def _register_answer_tools(server, kb):
         maps to it, the DISA STIG findings that implement those controls on the systems you name, and ATT&CK's
         own mitigations and detection strategy. The answer opens with summary: rules found, rules per CAT,
         control_counts, mitigation and detection counts (detection counts analytics), cat_i (the CAT I V- ids
-        with their count), then controls_with_rules. Use those counts rather than counting lists yourself. A
+        with their count), then controls_with_rules. Use those counts rather than counting lists yourself.
+        protect.controls maps each control id to its name, family, source and rules. A
         control's rules include those DISA tags to its enhancements (e.g. AC-6(9) under AC-6), since the
         ATT&CK mapping names base controls; via, when present, maps each enhancement to the rules that reach
         the control only through it. Each finding gives its benchmark (stig_id/version, described in

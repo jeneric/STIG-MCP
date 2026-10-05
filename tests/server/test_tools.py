@@ -39,7 +39,7 @@ def test_defenses_for_technique__known_technique_and_system__returns_controls_wi
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", "RHEL 9 web server")
     assert result["technique"]["id"] == "T1078"
     assert result["resolved_systems"][0]["stig_id"] == "RHEL_9_STIG"
-    ac2_1 = next((c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)"), None)
+    ac2_1 = result["protect"]["controls"].get("AC-2(1)")
     assert ac2_1 is not None and ac2_1["rules"]
 
 
@@ -48,7 +48,7 @@ def test_defenses_for_technique__no_system_supplied__returns_controls_without_fi
     result = tools.defenses_for_technique(kb_holder(conn), "T1078")
     assert result["protect"]["controls"]
     assert result["protect"]["findings"] == {}
-    assert all(c["rules"] == [] for c in result["protect"]["controls"])
+    assert all(c["rules"] == [] for c in result["protect"]["controls"].values())
     assert any("system" in note.lower() for note in result["notes"])
 
 
@@ -82,7 +82,7 @@ def test_defenses_for_technique__explicit_benchmark_ids__bypasses_resolver(kb_pa
             "catalog": "disa",
         }
     ]
-    assert any(c["rules"] for c in result["protect"]["controls"])
+    assert any(c["rules"] for c in result["protect"]["controls"].values())
 
 
 def test_defenses_for_technique__explicit_ids_match_the_resolver_shape(kb_path):
@@ -221,7 +221,7 @@ def test_defenses_for_technique__unknown_technique__raises_with_guidance(kb_path
 def test_defenses_for_technique__override_suppresses_ctid_pair__pair_absent(kb_path):
     conn = open_db_for_test(kb_path)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["RHEL_9_STIG"])
-    control_ids = {c["control_id"] for c in result["protect"]["controls"]}
+    control_ids = set(result["protect"]["controls"])
     assert "AC-8" not in control_ids
 
 
@@ -249,7 +249,7 @@ def test_defenses_for_technique__mixed_severity_findings__ordered_cat_i_first(tm
     )
     conn = open_db_for_test(out)
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])
-    ac2_1 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)")
+    ac2_1 = result["protect"]["controls"]["AC-2(1)"]
     cats = [result["protect"]["findings"][rule]["severity"] for rule in ac2_1["rules"]]
     # Both halves matter: the equality pins the order, and the set pins that the fixture still
     # supplies three severities, so the order check cannot go quietly vacuous.
@@ -415,7 +415,7 @@ def test_defenses_for_technique__build_predates_any_stig__returns_controls_and_n
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U1")
     assert result["protect"]["controls"]
     assert result["protect"]["findings"] == {}
-    assert all(c["rules"] == [] for c in result["protect"]["controls"])
+    assert all(c["rules"] == [] for c in result["protect"]["controls"].values())
     assert [s["applicable"] for s in result["resolved_systems"]] == [False, False]
     assert any("predates the first official STIG" in n for n in result["notes"])
 
@@ -487,7 +487,7 @@ def test_defenses_for_technique__benchmark_holds_only_the_superseded_major__expl
     result = tools.defenses_for_technique(kb_holder(conn), "T1078", system_description="RHEL 9 U3")
     assert result["protect"]["controls"]
     assert result["protect"]["findings"] == {}
-    assert all(c["rules"] == [] for c in result["protect"]["controls"])
+    assert all(c["rules"] == [] for c in result["protect"]["controls"].values())
     assert [s["applicable"] for s in result["resolved_systems"]] == [False]
     assert any("V2" in n and "does not hold" in n for n in result["notes"])
 
@@ -1304,7 +1304,7 @@ def test_defenses_for_technique__currency_build__names_each_cause_end_to_end(
     build_kb(_currency_sources(tmp_path, **build), tmp_path / "kb.sqlite")
     conn = open_db_for_test(tmp_path / "kb.sqlite")
     result = tools.defenses_for_technique(kb_holder(conn), technique_id)
-    assert result["protect"]["controls"] == []
+    assert result["protect"]["controls"] == {}
     assert any(n.startswith(expected_start) for n in result["notes"]), result["notes"]
     assert "Controls come from the CTID mapping for ATT&CK 16.1; technique data is ATT&CK 19.1." in result["notes"]
     assert result["sources"]["ctid_attack_version"] == "16.1"

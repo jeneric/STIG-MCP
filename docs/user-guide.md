@@ -70,7 +70,7 @@ the STIG `findings` that implement them on the system you named, and ATT&CK's ow
 `mitigations` (`M1026 Privileged Account Management`). `detect` holds the technique's
 `detection_strategy` (`DET0560` for T1078) and its `analytics` (`AN1543` to `AN1547`), a
 map from each id to its name and platforms; it is null for a technique ATT&CK gives no
-detection strategy. The answer carries ids and names only;
+detection strategy. The answer carries ids, names and platforms, not MITRE's text.
 `defense_details` takes up to 10 ids of any of those three kinds and returns MITRE's text:
 a mitigation's description and how many techniques it covers, and for each analytic its
 description, platforms, `log_sources` and `mutable_elements`, the settings a detection
@@ -268,7 +268,7 @@ its id.
 
 ### When a technique has no controls
 
-`defenses_for_technique` can come back with an empty `protect.controls` list: the CTID mapping
+`defenses_for_technique` can come back with an empty `protect.controls`: the CTID mapping
 (and any local override) simply named none for this technique. When that happens, `notes`
 carries one of five messages explaining why, drawn from the technique's own ATT&CK
 metadata and the CTID mapping's. Each is shown below as you would actually see it, with the
@@ -670,7 +670,7 @@ with high confidence rather than returning candidates.
 
 The response's `technique` block is T1078 (Valid Accounts) with `redirected_from: null`,
 since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `protect.controls`
-lists the 800-53r5 controls mapped to T1078 (AC-2, AC-3, AC-6, and others), each naming the
+maps each 800-53r5 control id mapped to T1078 (AC-2, AC-3, AC-6, and others) to its
 `rules` for that benchmark, and `protect.findings` lists each of those rules once,
 CAT-ordered. `protect.mitigations` lists ATT&CK's mitigations for T1078, among them M1026
 and M1032, and `detect` names DET0560 with its analytics; neither carries text until

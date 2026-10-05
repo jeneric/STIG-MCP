@@ -720,7 +720,11 @@ def defenses_for_technique(  # noqa: PLR0913
         "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts),
         "technique": technique,
         "resolved_systems": _with_catalog(resolved_systems),
-        "protect": {"controls": controls, "findings": _listed_findings(findings), "mitigations": mitigations},
+        "protect": {
+            "controls": {c["control_id"]: {k: v for k, v in c.items() if k != "control_id"} for c in controls},
+            "findings": _listed_findings(findings),
+            "mitigations": mitigations,
+        },
         "detect": detect,
         "notes": notes + scope_notes + technique_notes,
         "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},

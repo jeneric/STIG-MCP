@@ -118,7 +118,7 @@ def test_finding_details__lower_case_and_padded_ids__still_match(two_benchmark_r
 
 def test_defenses_for_technique__any_answer__lists_each_finding_once_and_controls_by_rule_id(mixed_kb):
     result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG", "MIXED_SEVERITY_STIG"])
-    ac2_1 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2(1)")
+    ac2_1 = result["protect"]["controls"]["AC-2(1)"]
     assert "stig_findings" not in ac2_1
     assert set(ac2_1["rules"]) == set(result["protect"]["findings"])
     assert all(set(f) == _LIST_FINDING_KEYS for f in result["protect"]["findings"].values())
@@ -182,7 +182,7 @@ def test_defenses_for_technique__rule_tagged_to_an_enhancement__counts_for_the_b
     # The fixture's RHEL 9 rule cites CCI-000015, which DISA maps to AC-2(1) only; CTID maps
     # T1078 to AC-2.
     result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
-    by_id = {c["control_id"]: c for c in result["protect"]["controls"]}
+    by_id = result["protect"]["controls"]
     assert by_id["AC-2"]["rules"] == ["SV-100001r1_rule"]
     assert by_id["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
     assert "via" not in by_id["AC-2(1)"]
@@ -214,7 +214,7 @@ def rows_with_via(monkeypatch):
 
 def test_defenses_for_technique__via_keys__ordered_by_enhancement_number(kb_path, rows_with_via):
     result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
-    ac2 = next(c for c in result["protect"]["controls"] if c["control_id"] == "AC-2")
+    ac2 = result["protect"]["controls"]["AC-2"]
     assert list(ac2["via"]) == ["AC-2(3)", "AC-2(10)"]
     assert ac2["via"] == {"AC-2(3)": ["SV-3r1_rule"], "AC-2(10)": ["SV-2r1_rule", "SV-3r1_rule"]}
 
@@ -519,3 +519,11 @@ def test_defenses_for_technique__finding_without_a_v_id__keeps_null_and_cat_i_us
     result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
     assert result["protect"]["findings"]["SV-9r1_rule"]["group_id"] is None
     assert result["summary"]["cat_i"]["ids"] == ["SV-9r1_rule"]
+
+
+def test_defenses_for_technique__controls__map_each_control_id_to_its_entry(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
+    controls = result["protect"]["controls"]
+    assert isinstance(controls, dict)
+    assert all(set(entry) <= {"name", "family", "source", "rules", "via"} for entry in controls.values())
+    assert controls["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
