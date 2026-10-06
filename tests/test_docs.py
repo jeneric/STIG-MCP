@@ -475,7 +475,7 @@ def test_install__proxy_timeout__names_the_uv_setting():
     assert "`UV_HTTP_TIMEOUT`" in body
 
 
-_DEFENSES_HEADING = "Protect and Detect: ATT&CK mitigations and detections"
+_DEFENSES_HEADING = "Protect and Detect: MITRE ATT&CK mitigations and detections"
 
 
 def test_user_guide__defense_details_bound__matches_the_code():

@@ -77,7 +77,7 @@ The terms are explained again in the [Glossary](#glossary), near the end.
   - [Why doesn't the answer include the check and fix steps?](#why-doesnt-the-answer-include-the-check-and-fix-steps)
   - [What do CAT I, II, and III mean, and why is the answer ordered that way?](#what-do-cat-i-ii-and-iii-mean-and-why-is-the-answer-ordered-that-way)
   - [How do I get more out of it?](#how-do-i-get-more-out-of-it)
-- [Protect and Detect: ATT&CK mitigations and detections](#protect-and-detect-attck-mitigations-and-detections)
+- [Protect and Detect: MITRE ATT&CK mitigations and detections](#protect-and-detect-mitre-attck-mitigations-and-detections)
   - [What is in the protect and detect parts of an answer?](#what-is-in-the-protect-and-detect-parts-of-an-answer)
   - [How do I narrow detections to my platforms and logs?](#how-do-i-narrow-detections-to-my-platforms-and-logs)
   - [What do an actor's coverage counts mean?](#what-do-an-actors-coverage-counts-mean)
@@ -667,7 +667,7 @@ also brings its findings' titles: `["II"]` lists the CAT II findings with their 
   library compilation, and `ingested_at` for when this knowledge base was built. Call
   `check_sources` to learn whether a newer knowledge base is published.
 
-## Protect and Detect: ATT&CK mitigations and detections
+## Protect and Detect: MITRE ATT&CK mitigations and detections
 
 Every `defenses_for_technique` answer has two parts, named for two functions of the NIST
 Cybersecurity Framework (CSF) 2.0. `protect` says what prevents or limits the technique, and

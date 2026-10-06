@@ -22,7 +22,7 @@ copy keeps inside `site-packages`. The corpus conformance harness, a developer t
 - [Build the knowledge base](#build-the-knowledge-base)
   - [1. Fetch the sources](#1-fetch-the-sources)
   - [2. Ingest](#2-ingest)
-- [ATT&CK mitigations and detections](#attck-mitigations-and-detections)
+- [MITRE ATT&CK mitigations and detections](#mitre-attck-mitigations-and-detections)
 - [Placing the sources by hand](#placing-the-sources-by-hand)
   - [The SRG-STIG Library Compilation](#the-srg-stig-library-compilation)
 - [Keeping current](#keeping-current)
@@ -216,11 +216,11 @@ The knowledge base carries a schema version. The server starts against a knowled
 built by an older release, but never answers from it: it reports the outdated schema and
 tells you to re-run the ingest. Rebuilding is always the recovery: the knowledge base is
 derived entirely from the sources above. The current schema is `7`. Schema 7 adds ATT&CK's mitigations and detection strategies
-(see "ATT&CK mitigations and detections" below); schema 6 began recording every
+(see "MITRE ATT&CK mitigations and detections" below); schema 6 began recording every
 input file with its SHA-256 in `source_files`, and carries this project's license files in
 `notices`, so the notices travel with any copy of the knowledge base.
 
-## ATT&CK mitigations and detections
+## MITRE ATT&CK mitigations and detections
 
 Schema 7 holds ATT&CK's defensive objects in six tables, all read from the same
 `enterprise-attack.json` as the techniques:
