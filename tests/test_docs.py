@@ -515,3 +515,18 @@ def test_descriptions__every_manifest__names_mitigations_and_detections():
         text = path.read_text()
         assert "mitigations" in text and "detections" in text, path
     assert "detections" in (ROOT / "plugins" / "stig-mcp" / "README.md").read_text()
+
+
+_BOLD_RUN_IN = re.compile(r"^(?:\*\*[^*\n]+\*\* +\S|\s*- \*\*[^*\n]+[.?]\*\* +\S)", re.M)
+
+
+def test_user_guide__paragraphs_and_bullets__open_without_a_bold_sentence_run_in():
+    # A bold sentence followed directly by more text reads as one block in a dark theme, so
+    # paragraphs open plainly and a bullet's bold lead is a short label ending in a colon.
+    assert _BOLD_RUN_IN.findall(GUIDE.read_text()) == []
+
+
+def test_bold_run_in__the_old_shapes__are_caught_and_a_label_is_not():
+    assert _BOLD_RUN_IN.search("**Assessor building a coverage picture.** Call it.")
+    assert _BOLD_RUN_IN.search("- **No system given.** You called without it.")
+    assert not _BOLD_RUN_IN.search("- **No system given**: you called without it.")
