@@ -720,17 +720,18 @@ def defenses_for_technique(  # noqa: PLR0913
                 lambda analytic: {"name": analytic["name"], "platforms": analytic["platforms"]},
             ),
         }
+    listed = _listed_findings(findings, _titled_cats(severities))
     return {
         "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts),
         "technique": technique,
         "resolved_systems": _with_catalog(resolved_systems),
         "protect": {
             "controls": {c["control_id"]: {k: v for k, v in c.items() if k != "control_id"} for c in controls},
-            "findings": _listed_findings(findings),
+            "findings": listed,
             "mitigations": mitigations,
         },
         "detect": detect,
-        "notes": notes + scope_notes + technique_notes,
+        "notes": notes + scope_notes + technique_notes + _titles_note(listed),
         "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},
     }
 
@@ -820,18 +821,32 @@ def _benchmark_key(row):
     return f"{row['stig_id']}/{row['stig_version']}"
 
 
-def _listed_findings(findings):
+_TITLES_NOTE = (
+    'Titles are listed for CAT I only. Call again with severity=["II"] or ["III"] for those titles; '
+    "finding_details gives DISA's full text."
+)
+
+
+def _titled_cats(severities):
+    return set(severities) if severities else {"I"}
+
+
+def _listed_findings(findings, titled_cats):
     """List-answer entries: the rule id is the key, resolved_systems describes the benchmark,
-    the CAT fixes the level, and CCIs stay in finding_details."""
-    return {
-        rule_id: {
-            "benchmark": _benchmark_key(finding),
-            "group_id": finding["group_id"],
-            "severity": finding["severity"]["cat"],
-            "title": finding["title"],
-        }
-        for rule_id, finding in findings.items()
-    }
+    the CAT fixes the level, CCIs stay in finding_details, and titles come only for the CATs
+    the caller asked about (CAT I by default)."""
+    listed = {}
+    for rule_id, finding in findings.items():
+        cat = finding["severity"]["cat"]
+        entry = {"benchmark": _benchmark_key(finding), "group_id": finding["group_id"], "severity": cat}
+        if cat in titled_cats:
+            entry["title"] = finding["title"]
+        listed[rule_id] = entry
+    return listed
+
+
+def _titles_note(listed):
+    return [_TITLES_NOTE] if any("title" not in finding for finding in listed.values()) else []
 
 
 def _summary(findings, rules_by_control, defense_counts=None):
@@ -1031,6 +1046,7 @@ def techniques_for_actor(  # noqa: PLR0913
         notes.append(_no_rules_note(empty, severities))
     findings = _cat_ordered(findings)
     defense_counts = _actor_defense_summary(rows, detections, *filters)
+    listed = _listed_findings(findings, _titled_cats(severities))
     return {
         "summary": {
             "techniques": len(techniques),
@@ -1044,9 +1060,9 @@ def techniques_for_actor(  # noqa: PLR0913
         "resolved_systems": _with_catalog(resolved_systems),
         "techniques": techniques,
         "controls": controls,
-        "findings": _listed_findings(findings),
+        "findings": listed,
         "mitigations": dict(sorted(mitigation_names.items())),
-        "notes": notes,
+        "notes": notes + _titles_note(listed),
         "sources": sources,
     }
 

@@ -469,7 +469,8 @@ pieces and tends to summarize, which is how a list of CAT I findings comes back
 incomplete.
 
 So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON that
-lists each finding once, by benchmark, V- id, CAT and title, and opens with `summary`: the
+lists each finding once, by benchmark, V- id and CAT, with titles for CAT I only (a note
+names the call that brings the others' titles), and opens with `summary`: the
 number of rules found, the number at each CAT, `control_counts` (how many controls map and
 how many have rules in the resolved STIGs, counting rules tagged to a control's
 enhancements), the mitigation and detection counts, `cat_i` (the CAT I V- ids with their
@@ -503,7 +504,8 @@ the safe default. `findings` (`protect.findings` in a technique answer) are alwa
 CAT I first, then II, then III, and a control's `rules` follow the same order, so the
 findings that matter most for risk are the ones you see first without having to sort them
 yourself. Pass `severity` (for example
-`["I"]`) to leave the lower levels out of the answer altogether.
+`["I"]`) to leave the lower levels out of the answer altogether. Naming a CAT in `severity`
+also brings its findings' titles: `["II"]` lists the CAT II findings with their titles.
 
 ## Where an answer's facts came from
 

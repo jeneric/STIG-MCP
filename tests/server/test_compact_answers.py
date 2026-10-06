@@ -15,6 +15,15 @@ from tests.conftest import FIX, discovered, open_db_for_test
 
 _LIST_FINDING_KEYS = {"benchmark", "group_id", "severity", "title"}
 _ROW_KEYS = {"catalog", "stig_id", "stig_version", "rule_id", "group_id", "severity", "title", "ccis"}
+_UNTITLED_FINDING_KEYS = _LIST_FINDING_KEYS - {"title"}
+_TITLES_NOTE = (
+    'Titles are listed for CAT I only. Call again with severity=["II"] or ["III"] for those titles; '
+    "finding_details gives DISA's full text."
+)
+
+
+def _titled_by_cat(findings):
+    return {f["severity"]: "title" in f for f in findings.values()}
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +131,10 @@ def test_defenses_for_technique__any_answer__lists_each_finding_once_and_control
     ac2_1 = result["protect"]["controls"]["AC-2(1)"]
     assert "stig_findings" not in ac2_1
     assert set(ac2_1["rules"]) == set(result["protect"]["findings"])
-    assert all(set(f) == _LIST_FINDING_KEYS for f in result["protect"]["findings"].values())
+    assert all(
+        set(f) == (_LIST_FINDING_KEYS if f["severity"] == "I" else _UNTITLED_FINDING_KEYS)
+        for f in result["protect"]["findings"].values()
+    )
     details = tools.finding_details(mixed_kb, list(result["protect"]["findings"]))["findings"]
     assert {d["rule_id"] for d in details} == set(result["protect"]["findings"])
 
@@ -234,7 +246,10 @@ def test_techniques_for_actor__include_defenses__summary_comes_first(mixed_kb):
     assert next(iter(result)) == "summary"
     assert result["summary"]["by_cat"] == {"I": 1, "II": 1, "III": 1}
     assert result["findings"]
-    assert all(set(f) == _LIST_FINDING_KEYS for f in result["findings"].values())
+    assert all(
+        set(f) == (_LIST_FINDING_KEYS if f["severity"] == "I" else _UNTITLED_FINDING_KEYS)
+        for f in result["findings"].values()
+    )
 
 
 def test_techniques_for_actor__scope_notes__appear_once_on_the_answer_not_per_technique(mixed_kb):
@@ -531,3 +546,57 @@ def test_defenses_for_technique__controls__map_each_control_id_to_its_entry(mixe
     assert isinstance(controls, dict)
     assert all(set(entry) - {"via"} == {"name", "family", "source", "rules"} for entry in controls.values())
     assert controls["AC-2"]["via"] == {"AC-2(1)": ["SV-100001r1_rule"]}
+
+
+def test_defenses_for_technique__no_severity__titles_cat_i_only_and_notes_the_rest(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])
+    findings = result["protect"]["findings"]
+    assert _titled_by_cat(findings) == {"I": True, "II": False, "III": False}
+    assert all(
+        set(f) == (_LIST_FINDING_KEYS if f["severity"] == "I" else _UNTITLED_FINDING_KEYS) for f in findings.values()
+    )
+    assert result["notes"].count(_TITLES_NOTE) == 1
+
+
+@pytest.mark.parametrize("severity", [["II"], ["I", "II"], ["II", "III"]])
+def test_defenses_for_technique__severity_given__titles_every_listed_finding_and_adds_no_note(mixed_kb, severity):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"], severity=severity)
+    findings = result["protect"]["findings"]
+    assert sorted(_titled_by_cat(findings)) == sorted(severity)
+    assert all("title" in f for f in findings.values())
+    assert _TITLES_NOTE not in result["notes"]
+
+
+def test_defenses_for_technique__cat_i_only__adds_no_note(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"], severity=["I"])
+    assert _TITLES_NOTE not in result["notes"]
+    no_severity = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"])
+    assert {f["severity"] for f in no_severity["protect"]["findings"].values()} == {"I"}
+    assert _TITLES_NOTE not in no_severity["notes"]
+
+
+def test_defenses_for_technique__severity_with_no_findings__lists_none_and_adds_no_note(mixed_kb):
+    result = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["RHEL_9_STIG"], severity=["III"])
+    assert result["protect"]["findings"] == {}
+    assert _TITLES_NOTE not in result["notes"]
+
+
+def test_techniques_for_actor__no_severity__titles_cat_i_only_and_notes_the_rest(mixed_kb):
+    result = tools.techniques_for_actor(mixed_kb, "APT29", benchmark_ids=["MIXED_SEVERITY_STIG"], include_defenses=True)
+    assert _titled_by_cat(result["findings"]) == {"I": True, "II": False, "III": False}
+    assert result["notes"].count(_TITLES_NOTE) == 1
+
+
+def test_techniques_for_actor__without_defenses__has_no_titles_note(mixed_kb):
+    # A guard on the path this change leaves alone: no findings, so no note.
+    result = tools.techniques_for_actor(mixed_kb, "APT29")
+    assert "findings" not in result
+    assert _TITLES_NOTE not in result.get("notes", [])
+
+
+def test_defenses_for_technique__unknown_cat__is_untitled_and_noted(kb_path, monkeypatch):
+    row = {**_finding("SV-8r1_rule", "IV"), "via": []}
+    monkeypatch.setattr(queries, "findings_for_control", lambda conn, cid, *rest: [row] if cid == "AC-2" else [])
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
+    assert "title" not in result["protect"]["findings"]["SV-8r1_rule"]
+    assert _TITLES_NOTE in result["notes"]
