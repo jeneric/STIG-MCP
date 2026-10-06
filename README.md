@@ -8,7 +8,7 @@ about, and the answer gives you:
 - the NIST SP 800-53 security controls that mitigate it;
 - the DISA STIG configuration rules that implement those controls on that system, most
   severe first, with DISA's check and fix text on request;
-- MITRE ATT&CK's own mitigations, and which of its detections work with the logs you collect.
+- MITRE ATT&CK®'s own mitigations, and which of its detections work with the logs you collect.
 
 It does not scan or connect to your systems. Its answers come from a knowledge base, a local
 database of about 6 MB built from those public sources, which you install once. The
@@ -59,7 +59,7 @@ If that doesn't work, see [troubleshooting](https://github.com/jeneric/STIG-MCP/
 With the knowledge base installed, try:
 
 1. System owner: `What DISA STIG steps mitigate T1078 on Windows 11?`
-2. Security controls assessor: `Which ATT&CK techniques does APT29 use?`
+2. Security controls assessor: `Which MITRE ATT&CK® techniques does APT29 use?`
 3. Anyone, to find the right STIG: `Which STIG benchmarks apply to RHEL 9?`
 4. SOC analyst: `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
 
@@ -107,7 +107,7 @@ quick start.
   `install_knowledge_base` given a file path and its SHA-256 requests nothing at all.
 - `stig-mcp-install-kb` contacts the same hosts, and nothing at all with `--file`.
 - `stig-mcp-fetch`, used only to build the knowledge base yourself, downloads from
-  `raw.githubusercontent.com` and `api.github.com` (MITRE ATT&CK, the CTID mapping, the NIST
+  `raw.githubusercontent.com` and `api.github.com` (MITRE ATT&CK®, the CTID mapping, the NIST
   800-53 catalog) and from `dl.dod.cyber.mil` (DISA).
 
 [PRIVACY.md](https://github.com/jeneric/STIG-MCP/blob/main/PRIVACY.md) states what each of these requests sends and what is stored locally.
@@ -124,7 +124,7 @@ quick start.
 
 ## Third-party content
 
-The knowledge base aggregates MITRE ATT&CK, CTID mapping, DISA STIG, DISA CCI
+The knowledge base aggregates MITRE ATT&CK®, CTID mapping, DISA STIG, DISA CCI
 list, and NIST OSCAL content. See [NOTICE](https://github.com/jeneric/STIG-MCP/blob/main/NOTICE) for attribution and licensing obligations
 and [licenses/apache-2.0.txt](https://github.com/jeneric/STIG-MCP/blob/main/licenses/apache-2.0.txt) for the Apache 2.0
 license text that notice requires.
