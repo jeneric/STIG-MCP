@@ -587,6 +587,16 @@ def test_techniques_for_actor__no_severity__titles_cat_i_only_and_notes_the_rest
     assert result["notes"].count(_TITLES_NOTE) == 1
 
 
+@pytest.mark.parametrize("severity", [["II"], ["I", "II"], ["II", "III"]])
+def test_techniques_for_actor__severity_given__titles_every_listed_finding_and_adds_no_note(mixed_kb, severity):
+    result = tools.techniques_for_actor(
+        mixed_kb, "APT29", benchmark_ids=["MIXED_SEVERITY_STIG"], include_defenses=True, severity=severity
+    )
+    assert sorted(_titled_by_cat(result["findings"])) == sorted(severity)
+    assert all("title" in f for f in result["findings"].values())
+    assert _TITLES_NOTE not in result["notes"]
+
+
 def test_techniques_for_actor__without_defenses__has_no_titles_note(mixed_kb):
     # A guard on the path this change leaves alone: no findings, so no note.
     result = tools.techniques_for_actor(mixed_kb, "APT29")

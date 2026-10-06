@@ -469,19 +469,19 @@ pieces and tends to summarize, which is how a list of CAT I findings comes back
 incomplete.
 
 So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON that
-lists each finding once, by benchmark, V- id and CAT, with titles for CAT I only (a note
-names the call that brings the others' titles), and opens with `summary`: the
-number of rules found, the number at each CAT, `control_counts` (how many controls map and
-how many have rules in the resolved STIGs, counting rules tagged to a control's
-enhancements), the mitigation and detection counts, `cat_i` (the CAT I V- ids with their
-count) and, last, the ids of the controls that have rules. `techniques_for_actor` also
-counts the techniques, and with `include_defenses` puts `coverage` ahead of the mitigation
-and detection counts, so the gap counts sit inside the preview too. The counts come first
-so they fall inside that preview, and they spare the model counting long lists itself,
-which it gets wrong. How many CAT I ids also fit depends on the client: Copilot may
-reformat the answer before saving it, so rely on `cat_i.count` to tell whether the ids in
-view are all of them. That count is of V- ids, not rules: a requirement held at two
-majors, as vSphere 8.0's are, is one V- id and two rules.
+lists each finding once, by benchmark, V- id and CAT, with titles for CAT I only unless
+`severity` names other CATs (a note names the call that brings the others' titles), and
+opens with `summary`: the number of rules found, the number at each CAT, `control_counts`
+(how many controls map and how many have rules in the resolved STIGs, counting rules
+tagged to a control's enhancements), the mitigation and detection counts, `cat_i` (the CAT
+I V- ids with their count) and, last, the ids of the controls that have rules.
+`techniques_for_actor` also counts the techniques, and with `include_defenses` puts
+`coverage` ahead of the mitigation and detection counts, so the gap counts sit inside the
+preview too. The counts come first so they fall inside that preview, and they spare the
+model counting long lists itself, which it gets wrong. How many CAT I ids also fit depends
+on the client: Copilot may reformat the answer before saving it, so rely on `cat_i.count`
+to tell whether the ids in view are all of them. That count is of V- ids, not rules: a
+requirement held at two majors, as vSphere 8.0's are, is one V- id and two rules.
 
 Ask for the steps of the findings you care about and the model calls `finding_details`,
 which returns DISA's exact check and fix text, and the CCIs, for up to 50 rule ids or V-
