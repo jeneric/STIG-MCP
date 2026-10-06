@@ -25,13 +25,22 @@ Name a technique or an actor, and the system you care about, and the answer give
 - the 800-53 controls that mitigate it;
 - the STIG rules that implement those controls on your system, most severe first, with
   DISA's exact check and fix text on request;
-- ATT&CK's mitigations, for safeguards no STIG rule covers;
+- ATT&CK's own mitigations, useful where the STIG has no rule for a control;
 - ATT&CK's detection analytics, and which of them work with the logs you collect.
 
+Two words carry a narrower meaning here than in an assessment:
+
+- **Finding**: a STIG rule that applies to your system, a requirement to check. It is not a
+  failure the server detected.
+- **Mitigation**: a safeguard ATT&CK lists for a technique. "Mitigated" means ATT&CK lists
+  one, not that you have deployed it.
+
 The server does not scan anything, connect to your systems or know their configuration. It
-can tell you what the guidance says to check and fix, but not whether you are compliant. It
-runs on your machine and contacts GitHub only when asked to install or check for a knowledge
-base.
+can tell you what the guidance says to check and fix, but not whether you are compliant.
+
+The answers come from a knowledge base: a local database of about 6 MB, built from those
+public sources and installed once. The server runs on your machine, and contacts GitHub only
+when asked to install a knowledge base or check for a newer one.
 
 The terms are explained again in the [Glossary](#glossary), near the end.
 
@@ -51,12 +60,9 @@ The terms are explained again in the [Glossary](#glossary), near the end.
   - [Finding a technique](#finding-a-technique)
   - [Getting DISA's or MITRE's exact text](#getting-disas-or-mitres-exact-text)
   - [Keeping current](#keeping-current)
-- [Protect and Detect: ATT&CK mitigations and detections](#protect-and-detect-attck-mitigations-and-detections)
-  - [What is in the protect and detect parts of an answer?](#what-is-in-the-protect-and-detect-parts-of-an-answer)
-  - [How do I narrow detections to my platforms and logs?](#how-do-i-narrow-detections-to-my-platforms-and-logs)
-  - [What do an actor's coverage counts mean?](#what-do-an-actors-coverage-counts-mean)
-  - [Which tools does each conversation use?](#which-tools-does-each-conversation-use)
-  - [Why is an analytic not detectable when I collect its log?](#why-is-an-analytic-not-detectable-when-i-collect-its-log)
+- [Two worked examples](#two-worked-examples)
+  - [A live technique: T1078 on RHEL 9](#a-live-technique-t1078-on-rhel-9)
+  - [A revoked id: T1086 on Windows 11](#a-revoked-id-t1086-on-windows-11)
 - [Reading the answer](#reading-the-answer)
   - [Why did it answer about a different technique than I named?](#why-did-it-answer-about-a-different-technique-than-i-named)
   - [How does it match the actor I named?](#how-does-it-match-the-actor-i-named)
@@ -71,6 +77,12 @@ The terms are explained again in the [Glossary](#glossary), near the end.
   - [Why doesn't the answer include the check and fix steps?](#why-doesnt-the-answer-include-the-check-and-fix-steps)
   - [What do CAT I, II, and III mean, and why is the answer ordered that way?](#what-do-cat-i-ii-and-iii-mean-and-why-is-the-answer-ordered-that-way)
   - [How do I get more out of it?](#how-do-i-get-more-out-of-it)
+- [Protect and Detect: ATT&CK mitigations and detections](#protect-and-detect-attck-mitigations-and-detections)
+  - [What is in the protect and detect parts of an answer?](#what-is-in-the-protect-and-detect-parts-of-an-answer)
+  - [How do I narrow detections to my platforms and logs?](#how-do-i-narrow-detections-to-my-platforms-and-logs)
+  - [What do an actor's coverage counts mean?](#what-do-an-actors-coverage-counts-mean)
+  - [Which tools does each conversation use?](#which-tools-does-each-conversation-use)
+  - [Why is an analytic not detectable when I collect its log?](#why-is-an-analytic-not-detectable-when-i-collect-its-log)
 - [Where an answer's facts came from](#where-an-answers-facts-came-from)
   - [Which artifacts did this answer come from, and can I check it myself?](#which-artifacts-did-this-answer-come-from-and-can-i-check-it-myself)
   - [Checking for a newer knowledge base](#checking-for-a-newer-knowledge-base)
@@ -81,7 +93,6 @@ The terms are explained again in the [Glossary](#glossary), near the end.
   - [Tools](#tools)
   - [Revoked MITRE ATT&CK® ids](#revoked-mitre-attck-ids)
   - [Limits](#limits)
-  - [Two worked examples](#two-worked-examples)
 
 ## Three ways to use it
 
@@ -99,6 +110,10 @@ what a good answer to each prompt contains. Ask in your own words. The prompts s
 detail that gets a precise answer: a technique or actor, a product with its version, and,
 for detection, the logs you collect.
 
+A good answer is "fetched from the server": it quotes what the server returned rather than
+what the model remembers. If you cannot tell which it is, ask the model where a statement
+came from.
+
 The figures in an answer change as new ATT&CK and STIG releases arrive, so this guide
 describes what to look for rather than quoting them.
 
@@ -115,8 +130,10 @@ system is a Windows Server 2022 estate that collects Windows Security event logs
    > system, and which we can and cannot detect with the logs we have.
 
    A good answer sorts APT29's techniques into those groups and names the techniques in
-   each by ATT&CK id. Its counts come straight from the coverage summary the server
-   returns. A model that counts a long list by hand tends to get the numbers wrong.
+   each by ATT&CK id. "No mitigation" means ATT&CK lists none for the technique. "Mitigated
+   but no STIG rule" means ATT&CK lists one, but no rule in this system's STIG enforces a
+   matching control. Neither says what you have deployed. Check that the counts in later
+   answers match this one.
 
 2. > For the techniques that are mitigated but have no STIG rule, what does MITRE say
    > each mitigation actually involves?
@@ -138,9 +155,10 @@ system is a Windows Server 2022 estate that collects Windows Security event logs
 5. > List the CAT II STIG findings in this assessment that relate to account management,
    > with their titles.
 
-   Answers carry titles for CAT I findings only, so the model has to ask the server again
-   for the CAT II titles. A good answer quotes DISA's titles with each finding's V- id. If
-   a title reads like a paraphrase, ask the model where it came from.
+   Expect a second lookup here: answers carry titles for CAT I findings only, and titles
+   for lower severities are fetched on request. A good answer quotes DISA's titles with
+   each finding's V- id, DISA's number for a requirement, such as `V-257777`. If a title
+   reads like a paraphrase, ask the model where it came from.
 
 ### System owner
 
@@ -175,8 +193,7 @@ credentials.
 4. > Which CAT II findings concern account lockout or password policy? Give their V- ids
    > and titles.
 
-   As in the assessor's last prompt, the model asks the server again for the CAT II
-   titles. A good answer quotes DISA's titles rather than describing the findings in its
+   As in the assessor's last prompt, expect a second lookup for the CAT II titles. A good answer quotes DISA's titles rather than describing the findings in its
    own words.
 
 ### SOC analyst, detection engineer or threat hunter
@@ -192,10 +209,7 @@ telemetry is Windows Security event logs and Sysmon.
    > should we be alerting on?
 
    A good answer says which of APT29's techniques those two logs can detect. For each, it
-   names the ATT&CK analytics and the events they look for, fetched from the server. The
-   model has to name the logs as ATT&CK spells them, such as `WinEventLog:Sysmon`. If it
-   guesses a name wrongly, the server refuses it and suggests the closest names, and the
-   model should retry with one of them.
+   names the ATT&CK analytics and the events they look for, fetched from the server.
 
 2. > For the techniques we can't detect, which log sources and event channels would we
    > need to turn on?
@@ -220,8 +234,8 @@ telemetry is Windows Security event logs and Sysmon.
 5. > List the CAT II STIG findings about audit logging that would support these
    > detections, with their titles.
 
-   As in the other conversations, the model asks the server again for CAT II titles, and a
-   good answer quotes them.
+   As in the other conversations, expect a second lookup for the CAT II titles, and a good
+   answer quotes them.
 
 The tools behind each of these conversations are listed under
 [Which tools does each conversation use?](#which-tools-does-each-conversation-use)
@@ -233,20 +247,25 @@ not a wrong answer: it is the model answering from its training data and never c
 tool at all. A general question like "What does STIG guidance say about SSH?" can get
 answered fluently and incorrectly, with nothing in the reply to show a tool ran.
 
-Prompt shapes that reliably trigger tool use ask for something the model cannot already
-know: a specific ATT&CK technique id, a named actor, a STIG benchmark id, or a system
-description with a product and version. When you want certainty rather than a best
-guess, name the tool directly:
+Prompts that reliably trigger tool use ask for something the model cannot already know:
+
+- a specific ATT&CK technique id;
+- a named actor;
+- a STIG benchmark id;
+- a system description with a product and version.
+
+When you want certainty rather than a best guess, name the tool directly:
 
     Using #list_stigs, which RHEL benchmarks are in the knowledge base?
 
 GitHub Copilot needs one more thing before any of this works: see the Agent-mode
 requirement in the README's [quick start](../README.md#vs-code-github-copilot).
 
-To tell whether a tool actually ran, look for the tool's output shape in the answer:
-benchmark ids, rule ids (`SV-...r..._rule`), or CAT severities the model has
-no other way to produce verbatim. A fluent paragraph with no ids, rule numbers, or a
-`notes` explanation in it is a sign the model answered from memory, not from a result.
+To tell whether a tool actually ran, look for the tool's output shape in the answer. Look
+for benchmark ids, rule ids (`SV-...r..._rule`), or CAT severities the model has no other
+way to produce verbatim. A fluent paragraph is a warning sign if it has no ids, no rule
+numbers, and no `notes` explanation (the server's own caveats about the answer). It means
+the model answered from memory, not from a result.
 
 ## Scoping the prompt for a well-matched answer
 
@@ -254,9 +273,8 @@ Two things narrow an answer well: an ATT&CK technique id or actor, and a system
 description carrying both a product and a version, for example "RHEL 9" or "Windows 11"
 rather than "Linux" or "our servers."
 
-Vague input does not fail loudly. Matching against product and version is how the
-knowledge base decides it is confident enough to commit to a benchmark; a vague
-description just does not clear that bar. The result is a list of candidate systems
+Vague input does not fail loudly. The server picks a STIG only when it recognizes both a
+product and a version, and a vague description does not clear that bar. The result is a list of candidate systems
 instead of a resolved one, and the answer comes back with controls but no STIG steps
 until you narrow it.
 
@@ -267,10 +285,14 @@ passing one of them in `benchmark_ids` skips resolution entirely.
 
 ## More example prompts
 
-Each prompt below asks for something only a tool result supplies (benchmark ids, rule ids,
-DISA's text), and the tool it should call is shown after it. If the answer has none of those,
-name the tool in the prompt, as the `#list_stigs` example does; `#name` is GitHub Copilot's
-syntax, and in Claude Code saying "using the list_stigs tool" does the same.
+The model picks which of the server's tools to call. Each prompt below is followed by the
+tool it should call, so you can check which one ran; [Tools](#tools), under
+Reference, lists them all.
+
+Each prompt asks for something only a tool result supplies: benchmark ids, rule ids or
+DISA's text. If the answer has none of those, name the tool in the prompt, as the
+`#list_stigs` example above does. In GitHub Copilot, write `#` and the tool's name. In
+Claude Code, say "using the list_stigs tool".
 
 ### Starting from a technique
 
@@ -305,133 +327,49 @@ syntax, and in Claude Code saying "using the list_stigs tool" does the same.
 
 - `Is a newer stig-mcp knowledge base published?` (`check_sources`)
 
-[Two worked examples](#two-worked-examples), further down, walk through what a technique
+[Two worked examples](#two-worked-examples), next, walk through what a technique
 answer contains.
 
-## Protect and Detect: ATT&CK mitigations and detections
+## Two worked examples
 
-Every `defenses_for_technique` answer has two parts, named for two functions of the NIST
-Cybersecurity Framework (CSF) 2.0. `protect` says what prevents or limits the technique, and
-`detect` says how to spot it. The questions below explain each part, the options that narrow
-it, and the tools each role's conversation relies on.
+### A live technique: T1078 on RHEL 9
 
-### What is in the protect and detect parts of an answer?
+Prompt: `What DISA STIG steps mitigate T1078 on RHEL 9?`
 
-`protect` holds three things:
+The model calls `defenses_for_technique("T1078", system_description="RHEL 9")`.
+"RHEL 9" names both a product and a version, so it resolves the RHEL 9 STIG benchmark
+with high confidence rather than returning candidates.
 
-- `controls` are the 800-53r5 controls CTID maps to the technique.
-- `findings` are the STIG rules that implement them on the system you named.
-- `mitigations` are ATT&CK's own safeguards, such as `M1026 Privileged Account Management`.
+The response's `technique` block is T1078 (Valid Accounts) with `redirected_from: null`,
+since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `protect.controls`
+maps each 800-53r5 control id mapped to T1078 (AC-2, AC-3, AC-6, and others) to its
+`rules` for that benchmark, and `protect.findings` lists each of those rules once,
+CAT-ordered. `protect.mitigations` lists ATT&CK's mitigations for T1078, among them M1026
+and M1032, and `detect` names DET0560 with its analytics; neither carries text until
+`defense_details` is called.
+Some controls come back with rules. AC-2 is one, though DISA tags none of its RHEL 9 rules
+to AC-2 itself: they sit under its enhancements, and AC-2's `via` names which. Others come
+back empty with a `notes` entry reading "Control AC-5 has no rules, at the control or any of
+its enhancements, in the resolved STIG(s)." That means the RHEL 9 STIG, as DISA wrote it,
+has no rule tagged to a CCI under AC-5 or its enhancements, not that AC-5 is irrelevant.
+To quote the steps themselves, the model then calls `finding_details` with the V- ids of the
+findings it is answering about, and reads DISA's check and fix text from that.
 
-`detect` holds two:
+### A revoked id: T1086 on Windows 11
 
-- `detection_strategy` names the technique's ATT&CK detection strategy, such as `DET0560`
-  for T1078.
-- `analytics` maps each of its analytics (`AN1543` to `AN1547` for T1078) to its name and
-  platforms.
+Prompt: `What DISA STIG steps mitigate T1086 on Windows 11?`
 
-`detect` is null for a technique ATT&CK gives no detection strategy.
+T1086 was ATT&CK's id for PowerShell before it was retired and folded into T1059.001, the
+"PowerShell" sub-technique of Command and Scripting Interpreter. The model calls
+`defenses_for_technique("T1086", system_description="Windows 11")`. T1086 is not a
+live id, so the knowledge base looks up its `revoked-by` replacement instead of failing.
 
-The answer carries ids, names and platforms, not MITRE's text.
-`defense_details` takes up to 10 ids of any of those three kinds and returns MITRE's text:
-
-- a mitigation's description, and how many techniques it covers;
-- each analytic's description, platforms, `log_sources` and `mutable_elements`, the
-  settings a detection engineer tunes.
-
-Each log source gives the log name (such as `WinEventLog:Security`), its channel (such as
-`EventCode=4624`) and the `data_component` it records, by id and name, or null when ATT&CK
-names no component the bundle defines. Pass `technique_id` to `defense_details` to get
-MITRE's text about a mitigation on that particular technique, as `technique_description`.
-
-### How do I narrow detections to my platforms and logs?
-
-Two optional filters judge the Detect side. Neither removes an analytic from the answer;
-each adds a list of the analytics that pass.
-
-- `platforms` lists ATT&CK platform names in any case (`["Windows"]`). `detect.applicable`
-  then lists the ids of the analytics that apply. An unknown name is refused with the full
-  list.
-- `log_sources` lists the telemetry you collect, using ATT&CK's log source names as
-  `defense_details` prints them. `detect.detectable` then lists the ids of the analytics
-  whose log sources you cover. `log_sources` takes up to 100 names, and an unknown one is
-  refused naming the closest matches.
-
-An analytic is detectable only when every log source it needs is in your list, and one that
-names no log source at all is never detectable. When you also pass `platforms`, an analytic
-counts as detectable only if it is applicable too, in the list and in `summary`.
-
-Channels are not compared. Naming a log asserts you collect it, and the analytic's channel
-says which events within it matter. Case is ignored, because ATT&CK 19.2 spells four names
-two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling matches both.
-
-Each list is present only when its filter was given (absent: not judged), and is empty when
-none qualify. `summary` counts the mitigations and the analytics before `cat_i`, with how
-many are applicable and detectable when you passed the matching filter.
-
-### What do an actor's coverage counts mean?
-
-With `include_defenses`, `techniques_for_actor` adds the same ids to each technique:
-
-- the mitigation and detection strategy ids;
-- `analytics` as an id-to-platforms map, without the names `defenses_for_technique` gives;
-- `applicable` and `detectable` id lists. With `platforms`, each technique's `detectable`
-  is a subset of its `applicable`, as in `defenses_for_technique`.
-- `gaps`, the names of the coverage classes below that the technique falls in, in the order
-  listed. `detectable` is not a gap, so a technique with nothing missing has an empty list.
-
-The answer also gets a top-level `mitigations` map naming each M-id once, and a `coverage`
-block in `summary`, placed right before `cat_i`, ahead of the mitigation and detection
-counts. The three count different things. `summary.mitigations` counts references across
-techniques, so a mitigation on two techniques counts twice. `summary.detection` counts
-analytics, and `coverage` counts techniques.
-
-`coverage` holds:
-
-- `techniques`: how many the actor uses.
-- `without_mitigation`: techniques ATT&CK offers no mitigation for.
-- `mitigated_without_rules`: techniques with a mitigation but no control that has rules in
-  the scoped STIG (at the requested CAT levels, when you pass `severity`); present only when
-  a system was scoped.
-- `without_applicable_analytic`: no analytic for the platforms you named; present only with
-  `platforms`.
-- `detectable`: at least one analytic is satisfied by your `log_sources`, counting only
-  applicable ones when you named `platforms`.
-- `undetectable`: none is; present with `detectable`, only with `log_sources`.
-
-The last three are judged in that order, so with both filters each technique falls in
-exactly one of them. Read `coverage` for the counts, then each technique's `gaps` for which
-techniques make them up. The server has already applied these rules, so there is nothing to
-derive from `controls` or `analytics`.
-
-### Which tools does each conversation use?
-
-- **Security controls assessor**: `techniques_for_actor` with the actor, the system,
-  `include_defenses`, `platforms` and your `log_sources`. Then `defense_details` on the
-  M-ids of the techniques whose `gaps` name `mitigated_without_rules` (what safeguard is
-  missing from the STIG), and on the DET-ids of those naming `undetectable` (which log
-  sources would close the gap).
-- **System owner**: `defenses_for_technique` with the system, `cat_i` first, and
-  `finding_details` for DISA's steps. `protect.mitigations` names ATT&CK's safeguards
-  beside the controls, and `defense_details(["M1032"], technique_id="T1078")` gives MITRE's
-  reason it matters here. When a control has no rules in the scoped STIG, the technique's
-  mitigations say what to implement by other means.
-- **SOC analyst, detection engineer or threat hunter**: `techniques_for_actor` with
-  `include_defenses` and the `log_sources` you have. Then `defense_details` on the DET-ids
-  of the `undetectable` techniques; each analytic's `log_sources` say what to collect, and
-  its `mutable_elements` what to tune. The enabling steps for a log source are in the
-  vendor's documentation, not here. The STIG rules that turn on auditing are in
-  `finding_details` like any other rule. This server does not link them to analytics,
-  because the data does not.
-- **Any of them, for CAT II or III titles**: the same call again with `severity` naming
-  those CATs, as described under
-  [What do CAT I, II, and III mean?](#what-do-cat-i-ii-and-iii-mean-and-why-is-the-answer-ordered-that-way)
-
-### Why is an analytic not detectable when I collect its log?
-
-Because it needs more than one. An analytic that correlates `WinEventLog:Security` with
-`WinEventLog:Sysmon` is listed in `detectable` only when both are in `log_sources`. Call
-`defense_details` on the AN-id to see every log source it names.
+The response's `technique` block is T1059.001, with `redirected_from: "T1086"`, and
+`notes` opens with "ATT&CK revoked T1086 (PowerShell) in favor of T1059.001. Answering
+for T1059.001; cite that id instead." Everything after that, `resolved_systems`,
+`protect.controls`, `protect.findings`, follows exactly as in the first example, scoped to
+Windows 11. The surprising part is not an error: it is the intended behavior for a retired id,
+and the fix is to use T1059.001 in future calls.
 
 ## Reading the answer
 
@@ -729,6 +667,133 @@ also brings its findings' titles: `["II"]` lists the CAT II findings with their 
   library compilation, and `ingested_at` for when this knowledge base was built. Call
   `check_sources` to learn whether a newer knowledge base is published.
 
+## Protect and Detect: ATT&CK mitigations and detections
+
+Every `defenses_for_technique` answer has two parts, named for two functions of the NIST
+Cybersecurity Framework (CSF) 2.0. `protect` says what prevents or limits the technique, and
+`detect` says how to spot it. The questions below explain each part, the options that narrow
+it, and the tools each role's conversation relies on.
+
+### What is in the protect and detect parts of an answer?
+
+`protect` holds three things:
+
+- `controls` are the 800-53r5 controls CTID maps to the technique.
+- `findings` are the STIG rules that implement them on the system you named.
+- `mitigations` are ATT&CK's own safeguards, such as `M1026 Privileged Account Management`.
+
+`detect` holds two:
+
+- `detection_strategy` names the technique's ATT&CK detection strategy, such as `DET0560`
+  for T1078.
+- `analytics` maps each of its analytics (`AN1543` to `AN1547` for T1078) to its name and
+  platforms.
+
+`detect` is null for a technique ATT&CK gives no detection strategy.
+
+The answer carries ids, names and platforms, not MITRE's text.
+`defense_details` takes up to 10 ids of any of those three kinds and returns MITRE's text:
+
+- a mitigation's description, and how many techniques it covers;
+- each analytic's description, platforms, `log_sources` and `mutable_elements`, the
+  settings a detection engineer tunes.
+
+Each log source gives the log name (such as `WinEventLog:Security`), its channel (such as
+`EventCode=4624`) and the `data_component` it records, by id and name, or null when ATT&CK
+names no component the bundle defines. Pass `technique_id` to `defense_details` to get
+MITRE's text about a mitigation on that particular technique, as `technique_description`.
+
+### How do I narrow detections to my platforms and logs?
+
+Two optional filters judge the Detect side. Neither removes an analytic from the answer;
+each adds a list of the analytics that pass.
+
+- `platforms` lists ATT&CK platform names in any case (`["Windows"]`). `detect.applicable`
+  then lists the ids of the analytics that apply. An unknown name is refused with the full
+  list.
+- `log_sources` lists the telemetry you collect, using ATT&CK's log source names as
+  `defense_details` prints them. `detect.detectable` then lists the ids of the analytics
+  whose log sources you cover. `log_sources` takes up to 100 names, and an unknown one is
+  refused naming the closest matches. Names are ATT&CK's spellings, such as
+  `WinEventLog:Sysmon` rather than the Sysmon channel's name; the model can retry with one
+  of the suggestions.
+
+An analytic is detectable only when every log source it needs is in your list, and one that
+names no log source at all is never detectable. When you also pass `platforms`, an analytic
+counts as detectable only if it is applicable too, in the list and in `summary`.
+
+Channels are not compared. Naming a log asserts you collect it, and the analytic's channel
+says which events within it matter. Case is ignored, because ATT&CK 19.2 spells four names
+two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling matches both.
+
+Each list is present only when its filter was given (absent: not judged), and is empty when
+none qualify. `summary` counts the mitigations and the analytics before `cat_i`, with how
+many are applicable and detectable when you passed the matching filter.
+
+### What do an actor's coverage counts mean?
+
+With `include_defenses`, `techniques_for_actor` adds the same ids to each technique:
+
+- the mitigation and detection strategy ids;
+- `analytics` as an id-to-platforms map, without the names `defenses_for_technique` gives;
+- `applicable` and `detectable` id lists. With `platforms`, each technique's `detectable`
+  is a subset of its `applicable`, as in `defenses_for_technique`.
+- `gaps`, the names of the coverage classes below that the technique falls in, in the order
+  listed. `detectable` is not a gap, so a technique with nothing missing has an empty list.
+
+The answer also gets a top-level `mitigations` map naming each M-id once, and a `coverage`
+block in `summary`, placed right before `cat_i`, ahead of the mitigation and detection
+counts. The three count different things. `summary.mitigations` counts references across
+techniques, so a mitigation on two techniques counts twice. `summary.detection` counts
+analytics, and `coverage` counts techniques.
+
+`coverage` holds:
+
+- `techniques`: how many the actor uses.
+- `without_mitigation`: techniques ATT&CK offers no mitigation for.
+- `mitigated_without_rules`: techniques with a mitigation but no control that has rules in
+  the scoped STIG (at the requested CAT levels, when you pass `severity`); present only when
+  a system was scoped.
+- `without_applicable_analytic`: no analytic for the platforms you named; present only with
+  `platforms`.
+- `detectable`: at least one analytic is satisfied by your `log_sources`, counting only
+  applicable ones when you named `platforms`.
+- `undetectable`: none is; present with `detectable`, only with `log_sources`.
+
+The last three are judged in that order, so with both filters each technique falls in
+exactly one of them. Read `coverage` for the counts, then each technique's `gaps` for which
+techniques make them up. The server has already applied these rules, so there is nothing to
+derive from `controls` or `analytics`.
+
+### Which tools does each conversation use?
+
+- **Security controls assessor**: `techniques_for_actor` with the actor, the system,
+  `include_defenses`, `platforms` and your `log_sources`. Then `defense_details` on the
+  M-ids of the techniques whose `gaps` name `mitigated_without_rules` (what safeguard is
+  missing from the STIG), and on the DET-ids of those naming `undetectable` (which log
+  sources would close the gap).
+- **System owner**: `defenses_for_technique` with the system, `cat_i` first, and
+  `finding_details` for DISA's steps. `protect.mitigations` names ATT&CK's safeguards
+  beside the controls, and `defense_details(["M1032"], technique_id="T1078")` gives MITRE's
+  reason it matters here. When a control has no rules in the scoped STIG, the technique's
+  mitigations say what to implement by other means.
+- **SOC analyst, detection engineer or threat hunter**: `techniques_for_actor` with
+  `include_defenses` and the `log_sources` you have. Then `defense_details` on the DET-ids
+  of the `undetectable` techniques; each analytic's `log_sources` say what to collect, and
+  its `mutable_elements` what to tune. The enabling steps for a log source are in the
+  vendor's documentation, not here. The STIG rules that turn on auditing are in
+  `finding_details` like any other rule. This server does not link them to analytics,
+  because the data does not.
+- **Any of them, for CAT II or III titles**: the same call again with `severity` naming
+  those CATs, as described under
+  [What do CAT I, II, and III mean?](#what-do-cat-i-ii-and-iii-mean-and-why-is-the-answer-ordered-that-way)
+
+### Why is an analytic not detectable when I collect its log?
+
+Because it needs more than one. An analytic that correlates `WinEventLog:Security` with
+`WinEventLog:Sysmon` is listed in `detectable` only when both are in `log_sources`. Call
+`defense_details` on the AN-id to see every log source it names.
+
 ## Where an answer's facts came from
 
 ### Which artifacts did this answer come from, and can I check it myself?
@@ -861,7 +926,7 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
   platform, naming the log sources and events it reads, such as `AN1543`.
 - **ATT&CK**: MITRE's public catalog of how attackers operate: techniques, the groups that
   use them, mitigations and detections.
-- **Benchmark**: one STIG for one product and major version, named by an id such as
+- **Benchmark**: one STIG, usually for one product and major version, named by an id such as
   `RHEL_9_STIG`. `list_stigs` lists the ids this knowledge base holds.
 - **CAT I, II, III**: DISA's severity categories for a STIG rule: high, medium and low.
 - **CCI (Control Correlation Identifier)**: DISA's id linking a STIG rule to the 800-53
@@ -874,24 +939,39 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
   for two of them.
 - **CTID (Center for Threat-Informed Defense)**: publishes the mapping from ATT&CK
   techniques to the 800-53 controls that mitigate them.
+- **Data component**: the kind of activity a log source records, such as process creation,
+  as ATT&CK names it.
 - **Detection strategy (DET- id)**: ATT&CK's approach to detecting one technique, made up
   of analytics, such as `DET0560`.
 - **DISA (Defense Information Systems Agency)**: the DoD agency that publishes STIGs.
+- **DoD**: the US Department of Defense.
+- **Finding**: a STIG rule that applies to the system you named, a requirement to check.
+  It is not a failure the server detected.
 - **Group (G- id)**: a threat actor ATT&CK tracks, such as APT29 (`G0016`).
+- **Knowledge base**: the local database the server answers from, built from ATT&CK, the
+  CTID mapping, the STIGs and the NIST catalog. It is installed once and updated from this
+  project's GitHub releases.
 - **Log source**: a log ATT&CK names in its analytics, such as `WinEventLog:Security`.
 - **MCP (Model Context Protocol)**: the standard an AI assistant uses to call tools such as
   this server's.
 - **Mitigation (M- id)**: an ATT&CK safeguard against one or more techniques, such as
   `M1032` (Multi-factor Authentication).
+- **Mutable elements**: the settings in an ATT&CK analytic that you tune for your
+  environment, such as `TimeWindow` or `UserContext`.
 - **NIST SP 800-53 Rev. 5 (800-53r5)**: NIST's catalog of security and privacy controls,
   Revision 5.
+- **Override**: a local correction to the CTID mapping, kept in `overrides.yaml` by
+  whoever builds the knowledge base.
+- **Platform**: an operating environment ATT&CK names, such as Windows, Linux or macOS.
 - **POA&M (Plan of Action and Milestones)**: the RMF record of how and when a weakness
   will be fixed.
 - **RMF (Risk Management Framework)**: the process DoD systems follow to be authorized to
   operate.
-- **Rule id and V- id**: a STIG requirement has a V- id (`V-257777`), its group id, and a
-  rule id (`SV-257777r1155676_rule`) naming one revision of it. `finding_details` accepts
-  either.
+- **Rule id and V- id**: a STIG requirement has a V- id (`V-257777`) and a rule id
+  (`SV-257777r1155676_rule`) naming one revision of it. DISA's XCCDF calls the V- id the
+  group id, which has nothing to do with ATT&CK groups. `finding_details` accepts either.
+- **Schema**: the layout of the knowledge base. A new stig-mcp version may need a knowledge
+  base with a newer schema, and says so.
 - **SIEM (security information and event management)**: the system that collects logs and
   runs detections against them.
 - **SOC (security operations center)**: the team that monitors for and responds to attacks.
@@ -899,6 +979,8 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
   product, each with check and fix text.
 - **STIG Library Compilation**: DISA's periodic zip of every current STIG, which this
   knowledge base is built from.
+- **Sunset**: a STIG DISA no longer ships in its library, kept only from an older
+  compilation.
 - **Technique (T- id)**: one way attackers achieve a goal, such as T1078 (Valid Accounts).
   A sub-technique adds a number after a dot, such as T1059.001 (PowerShell).
 - **XCCDF**: the XML format DISA publishes STIGs in.
@@ -938,44 +1020,3 @@ does not scan anything, does not connect to the system you are asking about, and
 know your actual configuration. It can tell you what the guidance says to check and fix;
 it cannot tell you whether you are compliant. Reading a `check_text` back to you is not
 the same as having run the check.
-
-### Two worked examples
-
-#### A live technique: T1078 on RHEL 9
-
-Prompt: `What DISA STIG steps mitigate T1078 on RHEL 9?`
-
-The model calls `defenses_for_technique("T1078", system_description="RHEL 9")`.
-"RHEL 9" names both a product and a version, so it resolves the RHEL 9 STIG benchmark
-with high confidence rather than returning candidates.
-
-The response's `technique` block is T1078 (Valid Accounts) with `redirected_from: null`,
-since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `protect.controls`
-maps each 800-53r5 control id mapped to T1078 (AC-2, AC-3, AC-6, and others) to its
-`rules` for that benchmark, and `protect.findings` lists each of those rules once,
-CAT-ordered. `protect.mitigations` lists ATT&CK's mitigations for T1078, among them M1026
-and M1032, and `detect` names DET0560 with its analytics; neither carries text until
-`defense_details` is called.
-Some controls come back with rules. AC-2 is one, though DISA tags none of its RHEL 9 rules
-to AC-2 itself: they sit under its enhancements, and AC-2's `via` names which. Others come
-back empty with a `notes` entry reading "Control AC-5 has no rules, at the control or any of
-its enhancements, in the resolved STIG(s)." That means the RHEL 9 STIG, as DISA wrote it,
-has no rule tagged to a CCI under AC-5 or its enhancements, not that AC-5 is irrelevant.
-To quote the steps themselves, the model then calls `finding_details` with the V- ids of the
-findings it is answering about, and reads DISA's check and fix text from that.
-
-#### A revoked id: T1086 on Windows 11
-
-Prompt: `What DISA STIG steps mitigate T1086 on Windows 11?`
-
-T1086 was ATT&CK's id for PowerShell before it was retired and folded into T1059.001, the
-"PowerShell" sub-technique of Command and Scripting Interpreter. The model calls
-`defenses_for_technique("T1086", system_description="Windows 11")`. T1086 is not a
-live id, so the knowledge base looks up its `revoked-by` replacement instead of failing.
-
-The response's `technique` block is T1059.001, with `redirected_from: "T1086"`, and
-`notes` opens with "ATT&CK revoked T1086 (PowerShell) in favor of T1059.001. Answering
-for T1059.001; cite that id instead." Everything after that, `resolved_systems`,
-`protect.controls`, `protect.findings`, follows exactly as in the first example, scoped to
-Windows 11. The surprising part is not an error: it is the intended behavior for a retired id,
-and the fix is to use T1059.001 in future calls.
