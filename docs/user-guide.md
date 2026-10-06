@@ -89,7 +89,9 @@ is refused naming the closest matches. Case is ignored, because ATT&CK 19.2 spel
 names two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling
 matches both. `detect.detectable` lists the ids of the analytics whose log sources you
 cover: an analytic is detectable only when every log source it needs is in your list; one
-that names no log source at all is never detectable. Channels are not compared: naming a
+that names no log source at all is never detectable. When you also pass `platforms`, an
+analytic counts as detectable only if it is applicable too, in the list and in `summary`.
+Channels are not compared: naming a
 log asserts you collect it, and the analytic's channel says which events within it matter.
 Each list is present only when its filter was given (absent: not judged) and is empty when
 none qualify. `summary` counts the mitigations and the analytics before `cat_i`, with how
@@ -101,12 +103,11 @@ plus `applicable` and `detectable` id lists, a top-level `mitigations` map namin
 M-id once, and a `coverage` block to `summary`, placed right before `cat_i`, ahead of the
 mitigation and detection counts. `summary.mitigations` there counts references across
 techniques, so a mitigation on two techniques counts twice, and `summary.detection` counts
-analytics, while `coverage` counts techniques. Each technique also carries `gaps`, the
+analytics, while `coverage` counts techniques. With `platforms`, each technique's
+`detectable` is a subset of its `applicable`, as in `defenses_for_technique`. Each technique
+also carries `gaps`, the
 names of the coverage classes below that it falls in, in the order listed; `detectable` is
 not a gap, so a technique with nothing missing has an empty list. `coverage` holds:
-`detectable` ignores applicability: it lists every analytic whose log sources you collect,
-so it can name an analytic that is not in `applicable`, while `gaps` and `coverage` judge
-detectability over the applicable analytics only.
 
 - `techniques`: how many the actor uses.
 - `without_mitigation`: techniques ATT&CK offers no mitigation for.

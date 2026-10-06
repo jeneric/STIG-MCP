@@ -131,13 +131,13 @@ def _register_answer_tools(server, kb):
         platforms names ATT&CK platforms, e.g. ["Windows"], and detect.applicable then lists the analytics
         that apply to them; an unknown name is refused with the full list. log_sources names the telemetry you
         collect, with ATT&CK's log source names, in any case (e.g. ["WinEventLog:Security",
-        "WinEventLog:Sysmon"]); log_sources takes up to 100 names. detect.detectable then lists the analytics
-        whose every log source is in the list. detectable ignores applicability, so it can name an analytic
-        that is not in applicable. detect.analytics maps each analytic id to its name and platforms;
-        detect.applicable and detect.detectable list the qualifying ids and are present only when platforms or
-        log_sources was given (absent: not judged; empty: none qualify). Mitigations are listed by id and name
-        only: call defense_details with M-, DET- or AN- ids for MITRE's text, log sources and tunable
-        elements."""
+        "WinEventLog:Sysmon"]); log_sources takes up to 100 names. When platforms is given, detect.detectable
+        lists (and summary.detection counts) only applicable analytics whose every log source is in the list;
+        without platforms, every analytic whose log sources are all collected. detect.analytics maps each
+        analytic id to its name and platforms; detect.applicable and detect.detectable list the qualifying ids
+        and are present only when platforms or log_sources was given (absent: not judged; empty: none
+        qualify). Mitigations are listed by id and name only: call defense_details with M-, DET- or AN- ids
+        for MITRE's text, log sources and tunable elements."""
         with _guidance_reaches_the_caller():
             return _compact(
                 tools.defenses_for_technique(
@@ -187,9 +187,8 @@ def _register_actor_tool(server, kb):
         without_applicable_analytic (only with platforms), detectable and undetectable (only with
         log_sources); summary.detection counts analytics instead. Detection is judged applicability first when
         platforms is given, then detectability over the applicable analytics. Each technique's applicable and
-        detectable id lists are judged as in defenses_for_technique, so detectable can name an analytic that is
-        not applicable while gaps and summary.coverage judge detectability over the applicable analytics only;
-        log_sources takes up to 100 names. Call
+        detectable id lists are judged as in defenses_for_technique, so with platforms detectable is always a
+        subset of applicable; log_sources takes up to 100 names. Call
         defense_details with M-, DET- or AN- ids for MITRE's text. If the knowledge base is not built yet this
         returns {"status": "not_ready"} with the commands to run, rather than an error."""
         with _guidance_reaches_the_caller():

@@ -669,13 +669,17 @@ def _provenance_notes(conn, resolved_systems):
     return notes
 
 
+def _counts_as_detectable(analytic, platforms):
+    return bool(analytic["detectable"] and (not platforms or analytic["applicable"]))
+
+
 def _defense_counts(mitigations, detection, platforms, log_sources):
     analytics = detection["analytics"] if detection else []
     counts = {"analytics": len(analytics)}
     if platforms:
         counts["applicable"] = sum(1 for a in analytics if a["applicable"])
     if log_sources:
-        counts["detectable"] = sum(1 for a in analytics if a["detectable"])
+        counts["detectable"] = sum(1 for a in analytics if _counts_as_detectable(a, platforms))
     return {"mitigations": len(mitigations), "detection": counts}
 
 
@@ -915,7 +919,7 @@ def _listed_analytics(analytics, platforms, log_sources, entry):
     if platforms:
         listed["applicable"] = [analytic["id"] for analytic in analytics if analytic["applicable"]]
     if log_sources:
-        listed["detectable"] = [analytic["id"] for analytic in analytics if analytic["detectable"]]
+        listed["detectable"] = [analytic["id"] for analytic in analytics if _counts_as_detectable(analytic, platforms)]
     return listed
 
 

@@ -2153,3 +2153,29 @@ def test_techniques_for_actor__technique_without_a_detection_strategy__maps_no_a
     t1078 = next(t for t in result["techniques"] if t["technique_id"] == "T1078")
     assert (t1078["analytics"], t1078["applicable"], t1078["detectable"]) == ({}, [], [])
     assert t1078["detection_strategy"] is None
+
+
+_AUDITD = ["auditd:SYSCALL", "auditd:EXECVE"]
+
+
+def test_defenses_for_technique__platforms_exclude_the_satisfied_analytic__it_is_not_detectable(kb_path):
+    result = tools.defenses_for_technique(
+        app_module.KnowledgeBase(kb_path), "T1078", platforms=["Windows"], log_sources=_AUDITD
+    )
+    assert result["detect"]["detectable"] == []
+    assert result["summary"]["detection"]["detectable"] == 0
+
+
+def test_defenses_for_technique__no_platforms__detectable_ignores_applicability(kb_path):
+    result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", log_sources=_AUDITD)
+    assert result["detect"]["detectable"] == ["AN0002"]
+    assert result["summary"]["detection"]["detectable"] == 1
+
+
+def test_techniques_for_actor__platforms_given__detectable_is_a_subset_of_applicable(defenses_kb):
+    result = _apt29_coverage(defenses_kb, platforms=["Windows"], log_sources=_AUDITD)
+    by_id = {t["technique_id"]: t for t in result["techniques"]}
+    assert by_id["T1078"]["detectable"] == []
+    assert all(set(t["detectable"]) <= set(t["applicable"]) for t in result["techniques"])
+    detection = result["summary"]["detection"]
+    assert detection["detectable"] <= detection["applicable"]
