@@ -112,29 +112,31 @@ def _register_answer_tools(server, kb):
         log_sources: list[str] | None = None,
     ) -> TextContent:
         """Return the defenses the knowledge base holds for an ATT&CK technique: the 800-53r5 controls CTID maps to
-        it, the DISA STIG findings that implement those controls on the systems you name, and ATT&CK's own mitigations
-        and detection strategy. The answer opens with summary: rules found, rules per CAT, control_counts, mitigation
-        and detection counts (detection counts analytics), cat_i (the CAT I V- ids with their count), then
-        controls_with_rules. Use those counts rather than counting lists yourself. protect.controls maps each control
-        id to its name, family, source and rules. A control's rules include those DISA tags to its enhancements (e.g.
-        AC-6(9) under AC-6), since the ATT&CK mapping names base controls; via, when present, maps each enhancement to
-        the rules that reach the control only through it. Each finding gives its benchmark (stig_id/version, described
-        in resolved_systems), V- id and CAT; titles come with CAT I findings, or with every CAT named in severity, and
-        a note says how to get the rest; call finding_details with rule ids or V- ids for DISA's check and fix text
-        and the CCIs. severity narrows findings to CAT levels, e.g. ["I"]. A technique id ATT&CK has revoked (e.g.
-        T1562) is answered for its replacement, and the response reports the redirect in technique.redirected_from.
-        Include the product build in system_description where one exists (e.g. 'ESXi 8.0 U3'): some products ship two
-        STIG versions with different remediations, and the build selects the one that applies. benchmark_ids narrows
-        to benchmarks you already know and accepts at most 200; to scope a system you cannot name, pass
-        system_description instead and let the resolver do it. If the knowledge base is not built yet this returns
-        {"status": "not_ready"} with the commands to run, rather than an error. platforms names ATT&CK platforms, e.g.
-        ["Windows"], and detect.applicable then lists the analytics that apply to them; an unknown name is refused
-        with the full list. log_sources names the telemetry you collect, with ATT&CK's log source names, in any case
-        (e.g. ["WinEventLog:Security", "WinEventLog:Sysmon"]); log_sources takes up to 100 names. When platforms is
-        given, detect.detectable lists (and summary.detection counts) only applicable analytics whose every log source
-        is in the list; without platforms, every analytic whose log sources are all collected. detect.analytics maps
-        each analytic id to its name and platforms; detect.applicable and detect.detectable list the qualifying ids
-        and are present only when platforms or log_sources was given (absent: not judged; empty: none qualify).
+        it, the DISA STIG findings that implement those controls on the systems you name, and ATT&CK's own
+        mitigations and detection strategy. The answer opens with summary: rules found, rules per CAT,
+        control_counts, mitigation and detection counts (detection counts analytics), cat_i (the CAT I V- ids with
+        their count), then controls_with_rules. Use those counts rather than counting lists yourself.
+        protect.controls maps each control id to its name, family, source and rules. A control's rules include those
+        DISA tags to its enhancements (e.g. AC-6(9) under AC-6), since the ATT&CK mapping names base controls; via,
+        when present, maps each enhancement to the rules that reach the control only through it. Each finding gives
+        its benchmark (stig_id/version, described in resolved_systems), V- id and CAT; titles come with CAT I
+        findings, or with every CAT named in severity; when any are missing, summary.titles reads "CAT I only", so
+        never name or describe an untitled finding without fetching its title (call again with severity naming its
+        CAT); call finding_details with rule ids or V- ids for DISA's check and fix text and the CCIs. severity
+        narrows findings to CAT levels, e.g. ["I"]. A technique id ATT&CK has revoked (e.g. T1562) is answered for
+        its replacement, and the response reports the redirect in technique.redirected_from. Include the product
+        build in system_description where one exists (e.g. 'ESXi 8.0 U3'): some products ship two STIG versions with
+        different remediations, and the build selects the one that applies. benchmark_ids narrows to benchmarks you
+        already know and accepts at most 200; to scope a system you cannot name, pass system_description instead and
+        let the resolver do it. If the knowledge base is not built yet this returns {"status": "not_ready"} with the
+        commands to run, rather than an error. platforms names ATT&CK platforms, e.g. ["Windows"], and
+        detect.applicable then lists the analytics that apply to them; an unknown name is refused with the full list.
+        log_sources names the telemetry you collect, with ATT&CK's log source names, in any case (e.g.
+        ["WinEventLog:Security", "WinEventLog:Sysmon"]); log_sources takes up to 100 names. When platforms is given,
+        detect.detectable lists (and summary.detection counts) only applicable analytics whose every log source is in
+        the list; without platforms, every analytic whose log sources are all collected. detect.analytics maps each
+        analytic id to its name and platforms; detect.applicable and detect.detectable list the qualifying ids and
+        are present only when platforms or log_sources was given (absent: not judged; empty: none qualify).
         Mitigations are listed by id and name only: call defense_details with M-, DET- or AN- ids for MITRE's text,
         log sources and tunable elements."""
         with _guidance_reaches_the_caller():
@@ -171,7 +173,8 @@ def _register_actor_tool(server, kb):
         counting lists yourself. controls lists each control once with its rule ids, including rules DISA tags to its
         enhancements, which via names, and findings lists each finding once, without check or fix text (call
         finding_details for those), each naming its benchmark, V- id and CAT, with titles for CAT I or for the CATs
-        named in severity. Each technique lists its control ids grouped by where the mapping came from ("ctid" or
+        named in severity; summary.titles reads "CAT I only" when the rest are missing, so fetch a title before naming
+        an untitled finding. Each technique lists its control ids grouped by where the mapping came from ("ctid" or
         "override"). benchmark_ids accepts at most 200; it, severity (CAT levels, e.g. ["I"]), platforms and
         log_sources are validated always but only take effect with include_defenses. To scope a system you cannot
         name, pass system_description instead. With include_defenses each technique also lists its ATT&CK mitigations

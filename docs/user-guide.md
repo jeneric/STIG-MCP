@@ -470,7 +470,8 @@ incomplete.
 
 So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON that
 lists each finding once, by benchmark, V- id and CAT, with titles for CAT I only unless
-`severity` names other CATs (a note names the call that brings the others' titles), and
+`severity` names other CATs (`summary.titles` then reads "CAT I only" and a note names the
+call that brings the others' titles), and
 opens with `summary`: the number of rules found, the number at each CAT, `control_counts`
 (how many controls map and how many have rules in the resolved STIGs, counting rules
 tagged to a control's enhancements), the mitigation and detection counts, `cat_i` (the CAT

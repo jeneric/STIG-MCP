@@ -17,7 +17,8 @@ _LIST_FINDING_KEYS = {"benchmark", "group_id", "severity", "title"}
 _ROW_KEYS = {"catalog", "stig_id", "stig_version", "rule_id", "group_id", "severity", "title", "ccis"}
 _UNTITLED_FINDING_KEYS = _LIST_FINDING_KEYS - {"title"}
 _TITLES_NOTE = (
-    'Titles are listed for CAT I only. Call again with severity=["II"] or ["III"] for those titles; '
+    "Titles are listed for CAT I only: the CAT II and III findings here carry no title, so do not name "
+    'or describe them without fetching it. Call again with severity=["II"] or ["III"] for their titles; '
     "finding_details gives DISA's full text."
 )
 
@@ -145,6 +146,7 @@ def test_defenses_for_technique__summary__comes_first_and_counts_by_cat(mixed_kb
     assert list(result["summary"]) == [
         "findings",
         "by_cat",
+        "titles",
         "control_counts",
         "mitigations",
         "detection",
@@ -154,6 +156,7 @@ def test_defenses_for_technique__summary__comes_first_and_counts_by_cat(mixed_kb
     assert result["summary"] == {
         "findings": 4,
         "by_cat": {"I": 2, "II": 1, "III": 1},
+        "titles": "CAT I only",
         "control_counts": {"mapped": 3, "with_rules": 2},
         "cat_i": {"count": 2, "ids": ["V-770002", "V-100001"]},
         "mitigations": 2,
@@ -610,3 +613,21 @@ def test_defenses_for_technique__unknown_cat__is_untitled_and_noted(kb_path, mon
     result = tools.defenses_for_technique(app_module.KnowledgeBase(kb_path), "T1078", benchmark_ids=["RHEL_9_STIG"])
     assert "title" not in result["protect"]["findings"]["SV-8r1_rule"]
     assert _TITLES_NOTE in result["notes"]
+
+
+def test_defenses_for_technique__untitled_findings__summary_says_titles_cat_i_only_after_by_cat(mixed_kb):
+    summary = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=["MIXED_SEVERITY_STIG"])["summary"]
+    keys = list(summary)
+    assert summary["titles"] == "CAT I only"
+    assert keys.index("titles") == keys.index("by_cat") + 1
+
+
+def test_techniques_for_actor__untitled_findings__summary_says_titles_cat_i_only(mixed_kb):
+    result = tools.techniques_for_actor(mixed_kb, "APT29", benchmark_ids=["MIXED_SEVERITY_STIG"], include_defenses=True)
+    assert result["summary"]["titles"] == "CAT I only"
+
+
+@pytest.mark.parametrize(("benchmark", "severity"), [("MIXED_SEVERITY_STIG", ["II"]), ("RHEL_9_STIG", None)])
+def test_defenses_for_technique__every_finding_titled__summary_has_no_titles_key(mixed_kb, benchmark, severity):
+    summary = tools.defenses_for_technique(mixed_kb, "T1078", benchmark_ids=[benchmark], severity=severity)["summary"]
+    assert "titles" not in summary

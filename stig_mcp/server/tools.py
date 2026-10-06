@@ -722,7 +722,7 @@ def defenses_for_technique(  # noqa: PLR0913
         }
     listed = _listed_findings(findings, _titled_cats(severities))
     return {
-        "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts),
+        "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts, _untitled(listed)),
         "technique": technique,
         "resolved_systems": _with_catalog(resolved_systems),
         "protect": {
@@ -822,7 +822,8 @@ def _benchmark_key(row):
 
 
 _TITLES_NOTE = (
-    'Titles are listed for CAT I only. Call again with severity=["II"] or ["III"] for those titles; '
+    "Titles are listed for CAT I only: the CAT II and III findings here carry no title, so do not name "
+    'or describe them without fetching it. Call again with severity=["II"] or ["III"] for their titles; '
     "finding_details gives DISA's full text."
 )
 
@@ -845,11 +846,15 @@ def _listed_findings(findings, titled_cats):
     return listed
 
 
+def _untitled(listed):
+    return any("title" not in finding for finding in listed.values())
+
+
 def _titles_note(listed):
-    return [_TITLES_NOTE] if any("title" not in finding for finding in listed.values()) else []
+    return [_TITLES_NOTE] if _untitled(listed) else []
 
 
-def _summary(findings, rules_by_control, defense_counts=None):
+def _summary(findings, rules_by_control, defense_counts=None, untitled=False):
     """Counts and the CAT I ids, first in the answer: a client that spills a large result to a
     file shows the model only its opening characters. Stating the counts also spares the model
     counting long lists itself, which it gets wrong."""
@@ -866,6 +871,8 @@ def _summary(findings, rules_by_control, defense_counts=None):
     return {
         "findings": len(findings),
         "by_cat": by_cat,
+        # Beside the CAT counts so a model reading only the preview knows titles are missing.
+        **({"titles": "CAT I only"} if untitled else {}),
         "control_counts": {"mapped": len(rules_by_control), "with_rules": len(with_rules)},
         # Every count goes before cat_i, whose id list can run past a client's preview.
         **(defense_counts or {}),
@@ -1054,6 +1061,7 @@ def techniques_for_actor(  # noqa: PLR0913
                 findings,
                 {control_id: control["rules"] for control_id, control in controls.items()},
                 defense_counts,
+                _untitled(listed),
             ),
         },
         "actor": resolved,
