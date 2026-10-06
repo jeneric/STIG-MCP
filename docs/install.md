@@ -143,7 +143,7 @@ only this project's GitHub releases.
   `uv run stig-mcp-install-kb` from a checkout, does the same.
 - **Without access to GitHub:** install from a file; see [operations.md](operations.md),
   "Install a prebuilt knowledge base".
-- **Building it yourself:** `uv run stig-mcp-fetch` downloads ATT&CK, the CTID mapping, the
+- **Building it yourself:** `uv run stig-mcp-fetch` downloads MITRE ATT&CK®, the CTID mapping, the
   800-53 catalog, and DISA's STIG content. **This transfers roughly a gigabyte** and refuses
   to start with less than 2 GiB free. Then `uv run stig-mcp-ingest` builds the knowledge base.
 

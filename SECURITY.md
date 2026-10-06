@@ -55,5 +55,5 @@ In scope is the code in this repository, including:
 Report the same way if you find Controlled Unclassified Information (CUI) or other
 content that should not be public in this repository or in any knowledge base built with it.
 
-Out of scope: errors in the upstream content itself (ATT&CK, the CTID mapping, NIST SP
+Out of scope: errors in the upstream content itself (MITRE ATT&CK®, the CTID mapping, NIST SP
 800-53, DISA STIGs). Report those to their publishers.

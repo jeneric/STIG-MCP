@@ -26,7 +26,7 @@ local knowledge base.
 ## Building the knowledge base yourself
 
 - `stig-mcp-fetch` downloads from `raw.githubusercontent.com` and `api.github.com` (MITRE
-  ATT&CK, the CTID mapping, the NIST catalog) and from `dl.dod.cyber.mil` (DISA). It sends the
+  ATT&CK®, the CTID mapping, the NIST catalog) and from `dl.dod.cyber.mil` (DISA). It sends the
   same `User-Agent` of `stig-mcp`.
 - The fetch follows HTTP redirects with urllib's default handling and has no host allowlist,
   unlike the server's release requests, so a redirect can send it to a host not listed here.
