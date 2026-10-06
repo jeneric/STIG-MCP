@@ -1,9 +1,18 @@
 # stig-mcp
 
-Local MCP server that maps MITRE ATT&CK® techniques (and actors) to the NIST
-800-53r5 controls that mitigate them, with the DISA STIG fix and check steps for
-the systems under consideration, severity-ordered, and ATT&CK's own mitigations and
-detections where ATT&CK publishes them.
+A local MCP (Model Context Protocol) server that lets an AI assistant, such as GitHub
+Copilot in VS Code or Claude Code, answer security questions from published guidance instead
+of from memory. Name a MITRE ATT&CK® technique or threat actor and the system you care
+about, and the answer gives you:
+
+- the NIST SP 800-53 security controls that mitigate it;
+- the DISA STIG configuration rules that implement those controls on that system, most
+  severe first, with DISA's check and fix text on request;
+- ATT&CK's own mitigations, and which of its detections work with the logs you collect.
+
+It does not scan or connect to your systems. The [user guide](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#summary) explains what it
+does and shows [three ways to use it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#three-ways-to-use-it): as a security controls
+assessor, a system owner, or a SOC analyst.
 
 <!-- mcp-name: io.github.jeneric/stig-mcp -->
 
@@ -52,9 +61,9 @@ With the knowledge base installed, try:
 3. `Which STIG benchmarks apply to RHEL 9?`
 4. `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
 
-[More example prompts](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#example-prompts) are in the user guide, with
-[how to get more out of it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-more-out-of-it) and
-[how to make sure the agent answers from the server](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-the-llm-to-use-the-server).
+[More example prompts](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#more-example-prompts) are in the user guide, with
+[how to get more out of it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#how-do-i-get-more-out-of-it) and
+[how to make sure the agent answers from the server](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#getting-the-model-to-use-the-server).
 
 ## Other MCP clients
 
