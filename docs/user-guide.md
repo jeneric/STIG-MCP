@@ -6,6 +6,9 @@ For a person talking to an LLM that has this server wired in as an MCP tool.
 
 - [Tools](#tools)
   - [Revoked MITRE ATT&CK® ids](#revoked-mitre-attck-ids)
+- [Protect and Detect: ATT&CK mitigations and detections](#protect-and-detect-attck-mitigations-and-detections)
+  - [Three ways to use it](#three-ways-to-use-it)
+  - [Why is an analytic not detectable when I collect its log?](#why-is-an-analytic-not-detectable-when-i-collect-its-log)
 - [Getting the LLM to use the server](#getting-the-llm-to-use-the-server)
 - [Example prompts](#example-prompts)
 - [Scoping the prompt for a well-matched answer](#scoping-the-prompt-for-a-well-matched-answer)
@@ -35,9 +38,10 @@ For a person talking to an LLM that has this server wired in as an MCP tool.
 
 ## Tools
 
-- `mitigations_for_technique(technique_id, system_description?, stig_ids?, severity?)`
-- `techniques_for_actor(actor, system_description?, stig_ids?, include_mitigations?, severity?)`
+- `defenses_for_technique(technique_id, system_description?, benchmark_ids?, severity?, platforms?, log_sources?)`
+- `techniques_for_actor(actor, system_description?, benchmark_ids?, include_defenses?, severity?, platforms?, log_sources?)`
 - `finding_details(ids)` returns DISA's check and fix text for findings named by rule id or V- id
+- `defense_details(ids, technique_id?)` returns MITRE's text, log sources and tunables for mitigations, detection strategies and analytics named by M-, DET- or AN- id
 - `resolve_system(system_description, limit?)` returns `{candidates, notes}`
 - `search_techniques(query, limit?)`
 - `list_stigs(filter?)`
@@ -49,7 +53,7 @@ For a person talking to an LLM that has this server wired in as an MCP tool.
 ATT&CK retires and renumbers techniques between releases, and published mapping sets lag
 behind. The knowledge base records the `revoked-by` relationships it can resolve to a
 technique the bundle still defines, so a mapping written against a retired id is applied
-to its replacement instead of being dropped, and both `mitigations_for_technique` and
+to its replacement instead of being dropped, and both `defenses_for_technique` and
 `search_techniques` accept a retired id. Each answers for the replacement and reports the
 old id in `redirected_from`. A maintainer-side tombstone still removes a pair, and its
 technique id is remapped the same way, so a tombstone written against a retired id also
@@ -57,6 +61,99 @@ removes the pair the mapping set already carried on the replacement. If a mappin
 looks wrong or missing, that is fixable, just not from this side: see "Mapping overrides"
 in [docs/operations.md](operations.md), written for whoever builds and maintains this
 knowledge base.
+
+## Protect and Detect: ATT&CK mitigations and detections
+
+Every `defenses_for_technique` answer has two sections named for the NIST CSF 2.0
+functions they serve. `protect` holds the 800-53r5 `controls` CTID maps to the technique,
+the STIG `findings` that implement them on the system you named, and ATT&CK's own
+`mitigations` (`M1026 Privileged Account Management`). `detect` holds the technique's
+`detection_strategy` (`DET0560` for T1078) and its `analytics` (`AN1543` to `AN1547`), a
+map from each id to its name and platforms; it is null for a technique ATT&CK gives no
+detection strategy. The answer carries ids, names and platforms, not MITRE's text.
+`defense_details` takes up to 10 ids of any of those three kinds and returns MITRE's text:
+a mitigation's description and how many techniques it covers, and for each analytic its
+description, platforms, `log_sources` and `mutable_elements`, the settings a detection
+engineer tunes. Each log source gives the log name (such as `WinEventLog:Security`), its
+channel (such as `EventCode=4624`) and the `data_component` it records, by id and name, or
+null when ATT&CK names no component the bundle defines. Pass `technique_id` to
+`defense_details` to get MITRE's text about a mitigation on that particular technique, as
+`technique_description`.
+
+Two optional filters mark up the Detect side; neither removes an analytic from the answer.
+`platforms` lists ATT&CK platform names in any case (`["Windows"]`); `detect.applicable`
+then lists the ids of the analytics that apply, and an unknown name is refused with the
+full list. `log_sources` lists the telemetry you collect, using ATT&CK's log source names
+as `defense_details` prints them; `log_sources` takes up to 100 names, and an unknown one
+is refused naming the closest matches. Case is ignored, because ATT&CK 19.2 spells four
+names two ways (`macos:unifiedlog` and `macOS:unifiedlog`, for one): either spelling
+matches both. `detect.detectable` lists the ids of the analytics whose log sources you
+cover: an analytic is detectable only when every log source it needs is in your list; one
+that names no log source at all is never detectable. When you also pass `platforms`, an
+analytic counts as detectable only if it is applicable too, in the list and in `summary`.
+Channels are not compared: naming a
+log asserts you collect it, and the analytic's channel says which events within it matter.
+Each list is present only when its filter was given (absent: not judged) and is empty when
+none qualify. `summary` counts the mitigations and the analytics before `cat_i`, with how
+many are applicable and detectable when you passed the matching filter.
+
+With `include_defenses`, `techniques_for_actor` adds the same ids to each technique, with
+`analytics` as an id-to-platforms map (without the names `defenses_for_technique` gives)
+plus `applicable` and `detectable` id lists, a top-level `mitigations` map naming each
+M-id once, and a `coverage` block to `summary`, placed right before `cat_i`, ahead of the
+mitigation and detection counts. `summary.mitigations` there counts references across
+techniques, so a mitigation on two techniques counts twice, and `summary.detection` counts
+analytics, while `coverage` counts techniques. With `platforms`, each technique's
+`detectable` is a subset of its `applicable`, as in `defenses_for_technique`. Each technique
+also carries `gaps`, the
+names of the coverage classes below that it falls in, in the order listed; `detectable` is
+not a gap, so a technique with nothing missing has an empty list. `coverage` holds:
+
+- `techniques`: how many the actor uses.
+- `without_mitigation`: techniques ATT&CK offers no mitigation for.
+- `mitigated_without_rules`: techniques with a mitigation but no control that has rules in
+  the scoped STIG (at the requested CAT levels, when you pass `severity`); present only when
+  a system was scoped.
+- `without_applicable_analytic`: no analytic for the platforms you named; present only with
+  `platforms`.
+- `detectable`: at least one analytic is satisfied by your `log_sources`, counting only
+  applicable ones when you named `platforms`.
+- `undetectable`: none is; present with `detectable`, only with `log_sources`.
+
+The last three are judged in that order, so with both filters each technique falls in
+exactly one of them.
+
+### Three ways to use it
+
+**Assessor building a coverage picture.** Call `techniques_for_actor` with the actor, the
+system, `include_defenses`, `platforms` and your `log_sources`. Read `coverage` for the
+counts, then each technique's `gaps` for which techniques make them up; the server has
+already applied the rules above, so there is nothing to derive from `controls` or
+`analytics`. Then call `defense_details` on the M-ids of the techniques whose `gaps` name
+`mitigated_without_rules` (what safeguard is missing from the STIG) and on the DET-ids of
+those naming `undetectable` (which log sources would close the gap).
+
+**System owner deciding what to fix first.** The existing flow is unchanged:
+`defenses_for_technique` with the system, `cat_i` first, `finding_details` for DISA's
+steps. `protect.mitigations` now names ATT&CK's safeguards beside the controls, and
+`defense_details(["M1032"], technique_id="T1078")` gives MITRE's reason it matters here,
+which is the vendor-neutral rationale a POA&M needs beside DISA's rule. When a control has
+no rules in the scoped STIG, the technique's mitigations say what to implement by other
+means.
+
+**Detection engineer deciding what to collect.** Scope the actor with `include_defenses`
+and the `log_sources` you have. Expand the DET-ids of the `undetectable` techniques with
+`defense_details`; each analytic's `log_sources` say what to collect and its
+`mutable_elements` what to tune. The enabling steps for a log source are in the vendor's
+documentation, not here. The STIG rules that turn on auditing are in `finding_details`
+like any other rule; this server does not link them to analytics, because the data does
+not.
+
+### Why is an analytic not detectable when I collect its log?
+
+Because it needs more than one. An analytic that correlates `WinEventLog:Security` with
+`WinEventLog:Sysmon` is listed in `detectable` only when both are in `log_sources`. Call
+`defense_details` on the AN-id to see every log source it names.
 
 ## Getting the LLM to use the server
 
@@ -76,7 +173,7 @@ GitHub Copilot needs one more thing before any of this works: see the Agent-mode
 requirement in the README's [quick start](../README.md#vs-code-github-copilot).
 
 To tell whether a tool actually ran, look for the tool's output shape in the answer:
-benchmark ids, rule ids (`SV-...r..._rule`), CCI numbers, or CAT severities the model has
+benchmark ids, rule ids (`SV-...r..._rule`), or CAT severities the model has
 no other way to produce verbatim. A fluent paragraph with no ids, rule numbers, or a
 `notes` explanation in it is a sign the model answered from memory, not from a result.
 
@@ -89,15 +186,17 @@ syntax, and in Claude Code saying "using the list_stigs tool" does the same.
 
 **Starting from a technique**
 
-- `What DISA STIG steps mitigate T1078 on Windows 11?` (`mitigations_for_technique`)
-- `Show only CAT I findings for T1059.001 on RHEL 9.` (`mitigations_for_technique` with
+- `What DISA STIG steps mitigate T1078 on Windows 11?` (`defenses_for_technique`)
+- `Show only CAT I findings for T1059.001 on RHEL 9.` (`defenses_for_technique` with
   `severity`)
 
 **Starting from an actor**
 
 - `Which ATT&CK techniques does APT29 use?` (`techniques_for_actor`)
 - `Which STIG steps mitigate the techniques Lazarus Group uses on Windows 11?`
-  (`techniques_for_actor` with `include_mitigations`)
+  (`techniques_for_actor` with `include_defenses`)
+- `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
+  (`techniques_for_actor` with `include_defenses`, `platforms` and `log_sources`)
 
 **Finding the right benchmark**
 
@@ -108,10 +207,11 @@ syntax, and in Claude Code saying "using the list_stigs tool" does the same.
 
 - `Which ATT&CK techniques cover credential dumping?` (`search_techniques`)
 
-**Getting DISA's exact text**
+**Getting DISA's or MITRE's exact text**
 
 - `Quote DISA's check and fix text for V-253284 word for word, then explain it.`
   (`finding_details`)
+- `Quote MITRE's text for M1032 on T1078.` (`defense_details` with `technique_id`)
 
 **Keeping current**
 
@@ -135,7 +235,7 @@ until you narrow it.
 If you already know which STIG benchmark applies, for example because your organization
 mandates a specific one, name its id directly rather than describing the system and
 letting resolution guess. `list_stigs` returns the ids the knowledge base actually holds;
-passing one of them in `stig_ids` skips resolution entirely.
+passing one of them in `benchmark_ids` skips resolution entirely.
 
 ## Reading the answer
 
@@ -172,7 +272,7 @@ its id.
 
 ### When a technique has no controls
 
-`mitigations_for_technique` can come back with an empty `controls` list: the CTID mapping
+`defenses_for_technique` can come back with an empty `protect.controls`: the CTID mapping
 (and any local override) simply named none for this technique. When that happens, `notes`
 carries one of five messages explaining why, drawn from the technique's own ATT&CK
 metadata and the CTID mapping's. Each is shown below as you would actually see it, with the
@@ -215,17 +315,17 @@ visible there without waiting for a technique that triggers the note.
 
 The `notes` field distinguishes these causes:
 
-- **No system given.** You called without `system_description` or `stig_ids`, so there is
+- **No system given.** You called without `system_description` or `benchmark_ids`, so there is
   nothing to scope STIG findings to. The note says as much and names both parameters.
 - **Nothing matched confidently.** Usually your `system_description` did not name a
   distinctive product and version, so nothing cleared the confidence bar. It can also
   happen after you named one correctly: see "Why did naming one product return three
   STIGs?" below for a wording that empties the scope even though the product was named
   plainly. Either way, the note suggests calling `resolve_system` or `list_stigs` to see
-  candidates, or passing `stig_ids` explicitly.
+  candidates, or passing `benchmark_ids` explicitly.
 - **The version you named is not held.** Your description named a product this knowledge
   base does cover, at a version it does not. The note replaces the one above, names the
-  benchmarks that are held and the versions they cover, and tells you to pass `stig_ids`
+  benchmarks that are held and the versions they cover, and tells you to pass `benchmark_ids`
   if you mean to use one anyway. It never claims DISA published no such STIG, only that
   this knowledge base does not hold one. Coverage is judged on the major version, so
   naming a patch level of a major that is held (`11.4` against a Solaris 11 benchmark)
@@ -255,7 +355,7 @@ The `notes` field distinguishes these causes:
     so it is not a claim about your RHEL, but the "closest benchmark" clause is unhelpful.
     Telling these apart from a real product needs judgment this knowledge base does not
     have, so they are left in rather than guessed at.
-  - **Two pieces naming related products can recommend overlapping `stig_ids`.**
+  - **Two pieces naming related products can recommend overlapping `benchmark_ids`.**
     `Cisco IOS XE 17, Cisco IOS 15` returns two lists, the second a superset of the first.
     Both are true; neither is the union.
 - **The benchmark is not version-specific.** Some products get one STIG rather than one
@@ -290,8 +390,8 @@ says so in `via`, which maps each enhancement to those rules.
 When more benchmarks tie with the last benchmark shown than the limit allows, the response
 says so: "N further benchmarks scored exactly as well as the last one shown ... and were
 omitted." Those N were cut by the cap rather than by score, which is what raising `limit`
-recovers for a `resolve_system` caller. A `mitigations_for_technique` caller has no `limit`
-parameter to raise; call `resolve_system` with a higher limit instead, or pass `stig_ids` to
+recovers for a `resolve_system` caller. A `defenses_for_technique` caller has no `limit`
+parameter to raise; call `resolve_system` with a higher limit instead, or pass `benchmark_ids` to
 name the benchmark directly. Benchmarks dropped for scoring lower are not counted, because
 they were not dropped arbitrarily.
 
@@ -313,7 +413,7 @@ merged piece can come back with nothing confident where naming the product alone
 
 ### Why is a benchmark id I named reported as not in the knowledge base?
 
-`stig_ids` is matched literally against the ids `list_stigs` returns, case-sensitively.
+`benchmark_ids` is matched literally against the ids `list_stigs` returns, case-sensitively.
 This fires for a typo, the wrong case, or a benchmark that genuinely was never fetched
 into this build. Call `list_stigs` (optionally with a `filter` substring) to see the
 exact ids on hand before naming one.
@@ -326,15 +426,15 @@ results, which returns the same findings as one call would.
 
 Note that the cap bounds the id list, not the size of the answer. A call at the cap can
 return a very large answer, especially from `techniques_for_actor` with
-`include_mitigations`. Ask for the benchmarks you need rather than the most you are allowed.
+`include_defenses`. Ask for the benchmarks you need rather than the most you are allowed.
 
 ### Why am I seeing steps from two versions of the same STIG?
 
 A few products ship two STIG versions at once, and their remediations differ. vSphere 8.0
 is the only one in the current library: DISA publishes V2 as current guidance and bundles
 V1R1 as supplemental guidance for older builds. Ask about ESXi 8.0 without saying which
-build you run and you get both, labeled by `stig_version`, because neither can be ruled
-out.
+build you run and you get both, labeled by `benchmark` (`…/1` and `…/2`), because neither
+can be ruled out.
 
 Name the build and you get one:
 
@@ -361,31 +461,35 @@ filter them, because there is only one STIG to select.
 ### Why doesn't the answer include the check and fix steps?
 
 Because the answers would be too big to read. DISA's check and fix text is most of every
-finding, and an actor's techniques share most of their findings, so an answer carrying
-all of it would run to megabytes. VS Code's Copilot agent currently saves any tool result
-over 8 KB to a temporary file and shows the model only its first 500 characters; Claude
-Code does the same above 25,000 tokens. A model then reads the file in pieces and tends
-to summarize, which is how a list of CAT I findings comes back incomplete.
+finding, and an actor's techniques share most of their findings, so an answer carrying all
+of it would run to megabytes. VS Code's Copilot agent currently saves any tool result over
+8 KB to a temporary file and shows the model only its first 500 characters; Claude Code
+saves any text result over 50,000 characters to a file. A model then reads the file in
+pieces and tends to summarize, which is how a list of CAT I findings comes back
+incomplete.
 
-So `mitigations_for_technique` and `techniques_for_actor` send one line of compact JSON
-that lists each finding once, by id, severity and title, and opens with `summary`: the
-number of rules found, the number at each CAT, `control_counts` (how many controls map
-and how many have rules in the resolved STIGs, counting rules tagged to a control's
-enhancements), `cat_i` (the CAT I V- ids with their count) and, last, the ids of the
-controls that have rules. `techniques_for_actor` also
-counts the techniques.
-The counts come first so they fall inside that preview, and they spare the model counting
-long lists itself, which it gets wrong. How many CAT I ids also fit depends on the client:
-Copilot may reformat the answer before saving it, so rely on `cat_i.count` to tell whether
-the ids in view are all of them. That count is of V- ids, not rules: a requirement held at
-two majors, as vSphere 8.0's are, is one V- id and two rules.
+So `defenses_for_technique` and `techniques_for_actor` send one line of compact JSON that
+lists each finding once, by benchmark, V- id and CAT, with titles for CAT I only unless
+`severity` names other CATs (`summary.titles` then reads "CAT I only" and a note names the
+call that brings the others' titles), and
+opens with `summary`: the number of rules found, the number at each CAT, `control_counts`
+(how many controls map and how many have rules in the resolved STIGs, counting rules
+tagged to a control's enhancements), the mitigation and detection counts, `cat_i` (the CAT
+I V- ids with their count) and, last, the ids of the controls that have rules.
+`techniques_for_actor` also counts the techniques, and with `include_defenses` puts
+`coverage` ahead of the mitigation and detection counts, so the gap counts sit inside the
+preview too. The counts come first so they fall inside that preview, and they spare the
+model counting long lists itself, which it gets wrong. How many CAT I ids also fit depends
+on the client: Copilot may reformat the answer before saving it, so rely on `cat_i.count`
+to tell whether the ids in view are all of them. That count is of V- ids, not rules: a
+requirement held at two majors, as vSphere 8.0's are, is one V- id and two rules.
 
 Ask for the steps of the findings you care about and the model calls `finding_details`,
-which returns DISA's exact check and fix text for up to 50 rule ids or V- ids at a time.
-A V- id that two benchmarks or two majors share returns every match, each labeled with its
-benchmark.
+which returns DISA's exact check and fix text, and the CCIs, for up to 50 rule ids or V-
+ids at a time. A V- id that two benchmarks or two majors share returns every match, each
+labeled with its benchmark.
 
-In `techniques_for_actor` with `include_mitigations`, each technique names its controls
+In `techniques_for_actor` with `include_defenses`, each technique names its controls
 grouped by where the mapping came from (`ctid` or `override`), `controls` lists each
 control once with its rules, and a control with no rules in scope is named in one note
 rather than under every technique that maps to it.
@@ -397,16 +501,18 @@ is it reading this server's answer back from where it saved it. It is safe to al
 
 CAT is DISA's severity ranking: CAT I is the highest-risk finding (mapped from XCCDF
 `severity="high"`), CAT II is medium, and CAT III is low, or unknown severity treated as
-the safe default. `findings` are always listed CAT I first, then II, then III, and a
-control's `rules` follow the same order, so the findings that matter most for risk are the
-ones you see first without having to sort them yourself. Pass `severity` (for example
-`["I"]`) to leave the lower levels out of the answer altogether.
+the safe default. `findings` (`protect.findings` in a technique answer) are always listed
+CAT I first, then II, then III, and a control's `rules` follow the same order, so the
+findings that matter most for risk are the ones you see first without having to sort them
+yourself. Pass `severity` (for example
+`["I"]`) to leave the lower levels out of the answer altogether. Naming a CAT in `severity`
+also brings its findings' titles: `["II"]` lists the CAT II findings with their titles.
 
 ## Where an answer's facts came from
 
 ### Which artifacts did this answer come from, and can I check it myself?
 
-`mitigations_for_technique`, `techniques_for_actor` and `finding_details` responses carry
+`defenses_for_technique`, `techniques_for_actor` and `finding_details` responses carry
 a `sources` block naming what the answer was built from: which DISA STIG library
 compilation, which ATT&CK release, which CTID mapping-set version, which CCI list, and
 when the knowledge base was built (`ingested_at`). Keys appear only when that source was
@@ -421,7 +527,7 @@ STIG document: its `<version>` element and a `Release: N` line. Neither the docu
 a filename carries it as a single string. DISA's own zip names, revision history, and
 cyber.mil pages use the identical composed token, though, which is why it is still the
 right string to search for there. `origin`, present on a `finding_details` entry and on most
-`resolved_systems` entries (the placeholder row synthesized for a `stig_ids` value the
+`resolved_systems` entries (the placeholder row synthesized for a `benchmark_ids` value the
 knowledge base does not hold carries no `origin` key), says which kind of artifact
 supplied that benchmark: `library` (the current DISA STIG Library Compilation),
 `product_zip` (a hand-placed zip file), `sunset` (a superseded compilation kept only
@@ -486,7 +592,7 @@ knowledge base that was there before. A file install's result names the file ins
 release (its release is null), and holds the SHA-256 values, the schema and `replaced`; the
 compressed value is null for a `.sqlite` file, and there is no `built_with` or source versions.
 
-Answers from `mitigations_for_technique`, `techniques_for_actor` and `finding_details`
+Answers from `defenses_for_technique`, `techniques_for_actor` and `finding_details`
 carry `kb_sha256` in their `sources` block. It is the installed file's SHA-256, which is
 what two people compare to know they queried the same knowledge base.
 
@@ -530,14 +636,14 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
 
 ## Getting more out of it
 
-- **Narrow to specific benchmark ids.** Pass `stig_ids` once you know which benchmarks
+- **Narrow to specific benchmark ids.** Pass `benchmark_ids` once you know which benchmarks
   apply, instead of re-describing the system every time.
 - **Ask for CAT I only.** `severity` narrows an answer to the CAT levels you name, so
   "only CAT I findings" becomes a smaller answer rather than a filter the model applies to
   a large one.
 - **Ask which benchmarks exist for a product before asking for steps.** `list_stigs` with
   a `filter` substring (a product name, or a benchmark id fragment) shows what is on hand
-  before you commit to a `system_description` or `stig_ids`.
+  before you commit to a `system_description` or `benchmark_ids`.
 - **Ask for the exact steps, word for word.** Every finding carries a `rule_id` and
   `group_id`; asking the model to fetch them with `finding_details` gets DISA's own
   `check_text` and `fix_text`, and lets you check the source STIG XCCDF yourself. The tool
@@ -547,7 +653,7 @@ specific benchmark is absent from the library, see "Why a benchmark disappeared"
   `stig_title` and `stig_release` in that answer name the benchmark release the text came
   from.
 - **Ask how current the knowledge base is.** `list_stigs` returns each benchmark's own DISA
-  revision number as `version`, not a build date. `mitigations_for_technique` and
+  revision number as `version`, not a build date. `defenses_for_technique` and
   `techniques_for_actor` carry that in their `sources` block instead: which DISA STIG
   library compilation, and `ingested_at` for when this knowledge base was built. Call
   `check_sources` to learn whether a newer knowledge base is published.
@@ -566,14 +672,17 @@ the same as having run the check.
 
 Prompt: `What DISA STIG steps mitigate T1078 on RHEL 9?`
 
-The model calls `mitigations_for_technique("T1078", system_description="RHEL 9")`.
+The model calls `defenses_for_technique("T1078", system_description="RHEL 9")`.
 "RHEL 9" names both a product and a version, so it resolves the RHEL 9 STIG benchmark
 with high confidence rather than returning candidates.
 
 The response's `technique` block is T1078 (Valid Accounts) with `redirected_from: null`,
-since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `controls` lists
-the 800-53r5 controls mapped to T1078 (AC-2, AC-3, AC-6, and others), each naming the
-`rules` for that benchmark, and `findings` lists each of those rules once, CAT-ordered.
+since T1078 is a live id. `resolved_systems` names the RHEL 9 benchmark. `protect.controls`
+maps each 800-53r5 control id mapped to T1078 (AC-2, AC-3, AC-6, and others) to its
+`rules` for that benchmark, and `protect.findings` lists each of those rules once,
+CAT-ordered. `protect.mitigations` lists ATT&CK's mitigations for T1078, among them M1026
+and M1032, and `detect` names DET0560 with its analytics; neither carries text until
+`defense_details` is called.
 Some controls come back with rules. AC-2 is one, though DISA tags none of its RHEL 9 rules
 to AC-2 itself: they sit under its enhancements, and AC-2's `via` names which. Others come
 back empty with a `notes` entry reading "Control AC-5 has no rules, at the control or any of
@@ -588,12 +697,12 @@ Prompt: `What DISA STIG steps mitigate T1086 on Windows 11?`
 
 T1086 was ATT&CK's id for PowerShell before it was retired and folded into T1059.001, the
 "PowerShell" sub-technique of Command and Scripting Interpreter. The model calls
-`mitigations_for_technique("T1086", system_description="Windows 11")`. T1086 is not a
+`defenses_for_technique("T1086", system_description="Windows 11")`. T1086 is not a
 live id, so the knowledge base looks up its `revoked-by` replacement instead of failing.
 
 The response's `technique` block is T1059.001, with `redirected_from: "T1086"`, and
 `notes` opens with "ATT&CK revoked T1086 (PowerShell) in favor of T1059.001. Answering
 for T1059.001; cite that id instead." Everything after that, `resolved_systems`,
-`controls`, `findings`, follows exactly as in the first example, scoped to Windows
-11. The surprising part is not an error: it is the intended behavior for a retired id,
+`protect.controls`, `protect.findings`, follows exactly as in the first example, scoped to
+Windows 11. The surprising part is not an error: it is the intended behavior for a retired id,
 and the fix is to use T1059.001 in future calls.

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from stig_mcp import applicability
 from stig_mcp.ingest import config, id_corrections, inventory, upstream
-from stig_mcp.ingest.attack_parser import parse_attack
+from stig_mcp.ingest.attack_parser import parse_attack, require_defenses
 from stig_mcp.ingest.cci_parser import cci_list_version, parse_cci_list
 from stig_mcp.ingest.control_catalog import catalog_version, parse_control_catalog
 from stig_mcp.ingest.mapping_loader import (
@@ -210,6 +210,60 @@ def _load_attack(conn, attack, summary):
             "INSERT OR IGNORE INTO actors(actor_id, name, aliases) VALUES (?, ?, ?)",
             (actor.actor_id, actor.name, ",".join(actor.aliases)),
         )
+
+
+def _analytic_row(analytic):
+    return (
+        analytic.analytic_id,
+        analytic.detection_strategy_id,
+        analytic.name,
+        analytic.description,
+        ",".join(analytic.platforms),
+        json.dumps(analytic.mutable_elements),
+    )
+
+
+def _load_defenses(conn, attack, summary):
+    """The ATT&CK defensive objects, after techniques so every FK resolves. A pair or strategy
+    whose technique the technique pass dropped is skipped, and with a strategy its analytics."""
+    known = {tech.technique_id for tech in attack.techniques}
+    strategies = [s for s in attack.detection_strategies if s.technique_id in known]
+    strategy_ids = {s.detection_strategy_id for s in strategies}
+    analytics = [a for a in attack.analytics if a.detection_strategy_id in strategy_ids]
+    conn.executemany(
+        "INSERT OR IGNORE INTO mitigations(mitigation_id, name, description) VALUES (?, ?, ?)",
+        [(m.mitigation_id, m.name, m.description) for m in attack.mitigations],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO technique_mitigation(technique_id, mitigation_id, description) VALUES (?, ?, ?)",
+        [
+            (p.technique_id, p.mitigation_id, p.description)
+            for p in attack.technique_mitigations
+            if p.technique_id in known
+        ],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO data_components(data_component_id, name, description) VALUES (?, ?, ?)",
+        [(d.data_component_id, d.name, d.description) for d in attack.data_components],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO detection_strategies(detection_strategy_id, technique_id, name) VALUES (?, ?, ?)",
+        [(s.detection_strategy_id, s.technique_id, s.name) for s in strategies],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO analytics(analytic_id, detection_strategy_id, name, description, platforms, "
+        "mutable_elements) VALUES (?, ?, ?, ?, ?, ?)",
+        [_analytic_row(a) for a in analytics],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO analytic_log_sources(analytic_id, name, channel, data_component_id) VALUES (?, ?, ?, ?)",
+        [(a.analytic_id, s.name, s.channel, s.data_component_id) for a in analytics for s in a.log_sources],
+    )
+    summary["mitigations"] = len(attack.mitigations)
+    summary["detection_strategies"] = len(strategies)
+    summary["analytics"] = len(analytics)
+    # Rows, not parsed references: some analytics repeat a name and channel pair, stored once.
+    summary["analytic_log_sources"] = conn.execute("SELECT COUNT(*) FROM analytic_log_sources").fetchone()[0]
 
 
 def _load_ctid_status(conn, ctid, revocations):
@@ -1140,12 +1194,14 @@ def _source_versions(sources, attack, ctid, catalog_loaded):
         released = _attack_release_dates(sources.attack_index_path).get(ctid.attack_version)
         if released:
             extra.append(("ctid_attack_release", released, sources.attack_index_path))
+    if attack.spec_version:
+        extra.append(("attack_spec_version", attack.spec_version, sources.attack_path))
     return versions, extra
 
 
 def _write_extra_meta(conn, extra, now):
     """ingest_meta rows that describe a source rather than name one: the mapping's ATT&CK version
-    and its release date."""
+    and its release date, and the bundle's ATT&CK spec version."""
     for name, version, path in extra:
         conn.execute(
             "INSERT OR REPLACE INTO ingest_meta(source_name, source_version, artifact_url_or_file, "
@@ -1337,7 +1393,9 @@ def _populate(conn, sources, summary, now):
     _load_ccis(conn, cci_records, summary)
 
     attack = parse_attack(sources.attack_path)
+    require_defenses(attack, sources.attack_path)
     _load_attack(conn, attack, summary)
+    _load_defenses(conn, attack, summary)
 
     ctid = load_ctid_mappings(sources.ctid_path)
     overrides = (
@@ -1382,6 +1440,10 @@ def build_kb(sources, out_path):
         "rule_id_collisions": 0,
         "techniques": 0,
         "revocations": 0,
+        "mitigations": 0,
+        "detection_strategies": 0,
+        "analytics": 0,
+        "analytic_log_sources": 0,
         "ccis": 0,
         "orphan_ctid_pairs": 0,
         "orphan_override_pairs": 0,

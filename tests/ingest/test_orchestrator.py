@@ -13,10 +13,12 @@ import pytest
 from stig_mcp import applicability
 from stig_mcp.ingest import config, id_corrections
 from stig_mcp.ingest import orchestrator as orchestrator_module
+from stig_mcp.ingest.attack_parser import Analytic, AttackData, AttackDefensesMissing, DetectionStrategy, LogSource
 from stig_mcp.ingest.inventory import Artifact, DiscoveredBenchmark, collect
 from stig_mcp.ingest.orchestrator import (
     IngestSources,
     _check_distinctiveness_margin,
+    _load_defenses,
     _release_label,
     build_kb,
     discover_stig_paths,
@@ -30,7 +32,9 @@ from tests.conftest import (
     MSSQL_INSTANCE_DOCUMENT,
     _filler_benchmarks,
     _sources,
+    defense_edges_to_an_intrusion_set,
     discovered,
+    minimal_defenses,
     mssql_pair,
     open_db_for_test,
 )
@@ -49,7 +53,7 @@ def test_build_kb__full_fixture_sources__populates_all_tables(tmp_path):
     techniques = {r["technique_id"] for r in conn.execute("SELECT technique_id FROM techniques")}
     assert "T1078" in techniques
     meta = conn.execute("SELECT schema_version FROM ingest_meta LIMIT 1").fetchone()
-    assert meta["schema_version"] == "6"
+    assert meta["schema_version"] == "7"
     stig_meta = conn.execute("SELECT * FROM ingest_meta WHERE source_name LIKE 'stig:%'").fetchall()
     assert len(stig_meta) == 1
     assert stig_meta[0]["source_name"].startswith("stig:")
@@ -1999,6 +2003,7 @@ def _currency_sources(tmp_path, attack_index=True, suppress_mapped=False):
             }
             for tid, day in techniques.items()
         ]
+        + minimal_defenses("attack-pattern--T1078")
     }
     (tmp_path / "bundle.json").write_text(json.dumps(bundle))
     overrides_path = None
@@ -2387,3 +2392,99 @@ def test_build_kb__a_governed_id_kept_from_a_loose_zip__raises_no_applicability_
         ("2", "library"),
     ]
     assert "Applicability entry" not in caplog.text
+
+
+def test_build_kb__the_fixture_bundle__populates_the_six_defense_tables_and_the_spec_version(kb_path):
+    conn = open_db_for_test(kb_path)
+    counts = {
+        table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # noqa: S608
+        for table in (
+            "mitigations",
+            "technique_mitigation",
+            "detection_strategies",
+            "analytics",
+            "analytic_log_sources",
+            "data_components",
+        )
+    }
+    assert counts == {
+        "mitigations": 2,
+        "technique_mitigation": 3,
+        "detection_strategies": 2,
+        "analytics": 3,
+        "analytic_log_sources": 5,
+        "data_components": 2,
+    }
+    row = conn.execute("SELECT platforms, mutable_elements FROM analytics WHERE analytic_id = 'AN0001'").fetchone()
+    assert row["platforms"] == "Windows"
+    assert json.loads(row["mutable_elements"])[0]["field"] == "TimeWindow"
+    meta = dict(conn.execute("SELECT source_name, source_version FROM ingest_meta").fetchall())
+    assert meta["attack_spec_version"] == "3.3.0"
+
+
+def test_build_kb__a_bundle_with_no_defenses__refuses_before_writing_the_knowledge_base(tmp_path):
+    bundle = {
+        "objects": [
+            {"type": "x-mitre-collection", "x_mitre_version": "19.1"},
+            {
+                "type": "attack-pattern",
+                "id": "attack-pattern--t1078",
+                "name": "Valid Accounts",
+                "external_references": [{"source_name": "mitre-attack", "external_id": "T1078"}],
+            },
+        ]
+    }
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle))
+    out = tmp_path / "kb.sqlite"
+    with pytest.raises(AttackDefensesMissing):
+        build_kb(_sources(attack_path=tmp_path / "bundle.json"), out)
+    assert not out.exists()
+
+
+def test_build_kb__summary__counts_the_defensive_rows(tmp_path):
+    summary = build_kb(_sources(), tmp_path / "kb.sqlite")
+    counts = (summary["mitigations"], summary["detection_strategies"], summary["analytics"])
+    assert (*counts, summary["analytic_log_sources"]) == (2, 2, 3, 5)
+
+
+def test_build_kb__an_analytic_naming_one_log_source_twice__summary_counts_the_stored_rows(tmp_path):
+    # ATT&CK 19.2 has analytics that repeat a name and channel pair; the table keeps one.
+    bundle = json.loads((FIX / "attack_bundle.json").read_text())
+    analytic = next(
+        o for o in bundle["objects"] if o["type"] == "x-mitre-analytic" and o["x_mitre_log_source_references"]
+    )
+    analytic["x_mitre_log_source_references"].append(dict(analytic["x_mitre_log_source_references"][0]))
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle))
+    summary = build_kb(_sources(attack_path=tmp_path / "bundle.json"), tmp_path / "kb.sqlite")
+    stored = open_db_for_test(tmp_path / "kb.sqlite").execute("SELECT COUNT(*) FROM analytic_log_sources").fetchone()[0]
+    assert stored == 5
+    assert summary["analytic_log_sources"] == stored
+
+
+def test_build_kb__defense_edges_targeting_an_intrusion_set__build_without_them(tmp_path):
+    bundle = json.loads((FIX / "attack_bundle.json").read_text())
+    bundle["objects"] += defense_edges_to_an_intrusion_set()
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle))
+    build_kb(_sources(attack_path=tmp_path / "bundle.json"), tmp_path / "kb.sqlite")
+    conn = open_db_for_test(tmp_path / "kb.sqlite")
+    assert conn.execute("SELECT COUNT(*) FROM analytics WHERE analytic_id = 'AN0098'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM technique_mitigation WHERE technique_id = 'G0016'").fetchone()[0] == 0
+
+
+def test_load_defenses__a_strategy_on_a_technique_the_technique_pass_dropped__inserts_none_of_its_rows(tmp_path):
+    attack = AttackData(
+        version="19.2",
+        detection_strategies=[DetectionStrategy("DET0098", "T0001", "orphan")],
+        analytics=[
+            Analytic("AN0098", "DET0098", "orphan", "", ["Windows"], [LogSource("WinEventLog:System", "", None)])
+        ],
+    )
+    summary = {}
+    with closing(create_db(tmp_path / "kb.sqlite")) as conn:
+        _load_defenses(conn, attack, summary)
+        counts = [
+            conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # noqa: S608
+            for table in ("detection_strategies", "analytics", "analytic_log_sources")
+        ]
+    assert counts == [0, 0, 0]
+    assert (summary["detection_strategies"], summary["analytics"], summary["analytic_log_sources"]) == (0, 0, 0)

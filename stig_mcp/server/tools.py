@@ -1,3 +1,7 @@
+import difflib
+import re
+from collections import Counter
+
 from stig_mcp.kb import freshness, install, queries, releases
 from stig_mcp.resolver.resolver import resolve
 from stig_mcp.server import readiness
@@ -17,11 +21,11 @@ def _answerable(kb):
     return conn, None
 
 
-def _explicit_scope(conn, stig_ids):
-    """Hydrate caller-supplied stig_ids into the shape the resolver returns, one entry
+def _explicit_scope(conn, benchmark_ids):
+    """Hydrate caller-supplied benchmark_ids into the shape the resolver returns, one entry
     per KB version of each id. An id the KB does not hold stays in the list with a note:
     dropping it would leave the caller with no findings and nothing to explain them."""
-    rows = queries.stigs_by_ids(conn, stig_ids)
+    rows = queries.stigs_by_ids(conn, benchmark_ids)
     # A caller-named id that the KB holds at more than one major returns every version's
     # findings, unfiltered by build, since no description was given to scope by. Flagging
     # that here is the only way the caller learns two majors (possibly with contradictory
@@ -47,7 +51,7 @@ def _explicit_scope(conn, stig_ids):
     known = {row["stig_id"] for row in rows}
     notes = []
     seen_unknown = set()
-    for stig_id in stig_ids:
+    for stig_id in benchmark_ids:
         if stig_id in known or stig_id in seen_unknown:
             continue
         seen_unknown.add(stig_id)
@@ -111,7 +115,7 @@ def _note_multi_major_explicit(hit):
     return (
         f"{hit['stig_id']} exists at more than one major in this knowledge base, and their "
         f"remediations differ. All are returned, labeled by stig_version. Naming a benchmark id "
-        f"returns every version it has; to scope to one, drop stig_ids and describe the system "
+        f"returns every version it has; to scope to one, drop benchmark_ids and describe the system "
         f"with its build instead, for example 'ESXi 8.0 U3'."
     )
 
@@ -158,7 +162,7 @@ def _note_version_uncovered(fragment, coverage):
         f"{'benchmarks are' if plural else 'benchmark is'} {_listed(benchmarks)}, "
         f"covering {', '.join(coverage['covered_versions'])}. "
         f"{'None of them applies' if plural else 'It does not apply'} to that version; "
-        f"to use one anyway, pass it in stig_ids."
+        f"to use one anyway, pass it in benchmark_ids."
     )
 
 
@@ -175,14 +179,14 @@ def _note_version_agnostic(fragment, coverage):
     # into tokens, so 'Google Chrome 120.0.6099' would be echoed as "0, 120, 6099", which
     # reorders the caller's own words. The fragment below carries it verbatim instead.
     #
-    # The subject list is capped and the stig_ids clause is not: advice a caller cannot paste
+    # The subject list is capped and the benchmark_ids clause is not: advice a caller cannot paste
     # is worse than a long sentence.
     return (
         f"{_listed(benchmarks)} {'are' if plural else 'is'} not version-specific: this "
         f"knowledge base holds no per-release benchmark for this product. The version you "
         f"named does not appear in {'them' if plural else 'it'}, which is why nothing was "
         f"auto-scoped, and is not evidence that {'they do' if plural else 'it does'} not "
-        f"apply to '{fragment}'. Pass stig_ids={benchmarks!r} to scope to "
+        f"apply to '{fragment}'. Pass benchmark_ids={benchmarks!r} to scope to "
         f"{'them' if plural else 'it'}."
     )
 
@@ -294,26 +298,26 @@ def _applicability_notes(hits):
 # not enumerating the corpus.
 #
 # **This bounds BOUND PARAMETERS, not response size, and those diverge hard.** techniques_for_actor
-# with include_mitigations at 200 ids can still return a very large answer. That is legal, but
+# with include_defenses at 200 ids can still return a very large answer. That is legal, but
 # do not read 200 as a safety margin for the caller. A response-size guard would be a separate
 # rule, measured in bytes.
-_MAX_STIG_IDS = 200
+_MAX_BENCHMARK_IDS = 200
 
 
-def _check_stig_ids(stig_ids):
-    """Reject a stig_ids list too long to be a scope, at the tools that ACCEPT it.
+def _check_benchmark_ids(benchmark_ids):
+    """Reject a benchmark_ids list too long to be a scope, at the tools that ACCEPT it.
 
     Called from each public tool rather than from _resolve_scope, because
-    `techniques_for_actor` accepts stig_ids and only forwards it when include_mitigations is
+    `techniques_for_actor` accepts benchmark_ids and only forwards it when include_defenses is
     set: checking at the choke point would let a caller pass thousands of ids to that tool and
     be told nothing. One helper, two call sites, so the rule is still written once.
     """
-    if stig_ids and len(stig_ids) > _MAX_STIG_IDS:
+    if benchmark_ids and len(benchmark_ids) > _MAX_BENCHMARK_IDS:
         raise CallerError(
-            f"stig_ids names {len(stig_ids)} benchmarks, over the limit of {_MAX_STIG_IDS}. "
-            f"A list this long is not a scope: stig_ids exists to narrow the answer to "
+            f"benchmark_ids names {len(benchmark_ids)} benchmarks, over the limit of {_MAX_BENCHMARK_IDS}. "
+            f"A list this long is not a scope: benchmark_ids exists to narrow the answer to "
             f"benchmarks you already know apply. Pass the handful that describe the system. "
-            f"If you genuinely need more, split them across calls of at most {_MAX_STIG_IDS} "
+            f"If you genuinely need more, split them across calls of at most {_MAX_BENCHMARK_IDS} "
             f"and merge the results, which returns the same findings as one call would. "
             f"Passing system_description instead scopes a system you cannot name, but it "
             f"resolves only the best few matches rather than a broad list. Call list_stigs "
@@ -344,7 +348,7 @@ def _check_finding_ids(ids):
     if not ids:
         raise CallerError(
             "ids must name at least one finding: a rule id (SV-...r..._rule) or V- id from the "
-            "findings of a mitigations_for_technique or techniques_for_actor answer."
+            "findings of a defenses_for_technique or techniques_for_actor answer."
         )
     if len(ids) > _MAX_FINDING_IDS:
         raise CallerError(
@@ -353,21 +357,111 @@ def _check_finding_ids(ids):
         )
 
 
-def _resolve_scope(conn, system_description, stig_ids):
-    if stig_ids:
+_MAX_LOG_SOURCES = 100
+
+
+def _check_list(name, value):
+    """A bare string would iterate by character, as _check_severity guards against."""
+    if value is None:
+        return None
+    if not isinstance(value, list | tuple) or not value or not all(isinstance(item, str) for item in value):
+        example = {"platforms": "['Windows']", "log_sources": "['WinEventLog:Security']"}[name]
+        raise CallerError(
+            f"{name} must be a non-empty list of names, for example {name}={example}; got {value!r}. "
+            f"Omit it to leave the answer unfiltered."
+        )
+    return tuple(dict.fromkeys(item.strip() for item in value))
+
+
+def _check_platforms(conn, platforms):
+    wanted = _check_list("platforms", platforms)
+    if wanted is None:
+        return None
+    known = queries.platform_names(conn)
+    spellings = _spellings_by_key(known)
+    unknown = [platform for platform in wanted if platform.casefold() not in spellings]
+    if unknown:
+        raise CallerError(
+            f"platforms names {', '.join(repr(p) for p in unknown)}, which ATT&CK does not use. "
+            f"Pass names from this list, in any case: {', '.join(known)}."
+        )
+    return list(dict.fromkeys(spellings[platform.casefold()][0] for platform in wanted))
+
+
+def _check_log_sources(conn, log_sources):
+    wanted = _check_list("log_sources", log_sources)
+    if wanted is None:
+        return None
+    if len(wanted) > _MAX_LOG_SOURCES:
+        raise CallerError(
+            f"log_sources names {len(wanted)} sources, over the limit of {_MAX_LOG_SOURCES}. Pass the "
+            f"sources your telemetry actually collects; a list this long is not a telemetry inventory."
+        )
+    known = queries.log_source_names(conn)
+    spellings = _spellings_by_key(known)
+    unknown = [source for source in wanted if source.casefold() not in spellings]
+    if unknown:
+        hints = []
+        for source in unknown:
+            closest = _closest(source, spellings)
+            hints.append(f"'{source}' (closest: {', '.join(closest)})")
+        raise CallerError(
+            f"log_sources names sources ATT&CK does not use: {'; '.join(hints)}. Pass ATT&CK's log "
+            f"source names as defense_details lists them under log_sources; case is ignored."
+        )
+    return list(dict.fromkeys(name for source in wanted for name in spellings[source.casefold()]))
+
+
+def _spellings_by_key(names):
+    """ATT&CK spells some names two ways (macos:unifiedlog, macOS:unifiedlog), so a caller's
+    name stands for every stored spelling that differs from it only in case."""
+    spellings = {}
+    for name in names:
+        spellings.setdefault(name.casefold(), []).append(name)
+    return spellings
+
+
+_WORD_BREAK = re.compile(r"[^0-9a-z]+")
+
+
+def _words(name):
+    return {word for word in _WORD_BREAK.split(name.casefold()) if word}
+
+
+def _closest(asked, spellings, n=3):
+    """The n names nearest `asked`, one spelling each. Names sharing the caller's rarest known
+    word come first, so 'WinEventLog:Microsoft-Windows-Sysmon/Operational' leads with
+    WinEventLog:Sysmon rather than the names it shares 'Microsoft-Windows' with."""
+    names = [variants[0] for variants in spellings.values()]
+    word_counts = Counter(word for name in names for word in _words(name))
+
+    def similarity(name):
+        return difflib.SequenceMatcher(None, asked.casefold(), name.casefold()).ratio()
+
+    shared = [word for word in _words(asked) if word in word_counts]
+    first = []
+    if shared:
+        rarest = min(shared, key=lambda word: (word_counts[word], word))
+        first = sorted((name for name in names if rarest in _words(name)), key=similarity, reverse=True)[:n]
+    rest = sorted((name for name in names if name not in first), key=similarity, reverse=True)
+    return (first + rest)[:n]
+
+
+def _resolve_scope(conn, system_description, benchmark_ids):
+    if benchmark_ids:
         # _explicit_scope only ever returns notes about unknown ids; the multi-major-explicit
         # note it never renders is added here, alongside the other applicability notes, so
         # every path through _resolve_scope emits one note per (benchmark, reason).
-        scope, resolved, notes = _explicit_scope(conn, stig_ids)
+        scope, resolved, notes = _explicit_scope(conn, benchmark_ids)
         notes = [*notes, *_applicability_notes(resolved)]
-        # stig_ids bypasses the resolver entirely, so system_description (if also given)
+        # benchmark_ids bypasses the resolver entirely, so system_description (if also given)
         # is never read. The multi-major-explicit note tells the caller to describe the
         # system instead, with an example that can read back the caller's own input
         # verbatim if they already passed one; without this, nothing says it was ignored.
         if system_description and any(r.get("applicability") == "multi-major-explicit" for r in resolved):
             notes.append(
-                f"system_description ('{system_description}') was supplied but ignored: stig_ids "
-                f"bypasses the resolver entirely. Drop stig_ids to scope from the description instead."
+                f"system_description ('{system_description}') was supplied but ignored: benchmark_ids "
+                f"bypasses the resolver entirely. Drop benchmark_ids to scope from the description instead."
             )
         return scope, resolved, notes
     if system_description:
@@ -416,7 +510,7 @@ def _resolve_scope(conn, system_description, stig_ids):
         if hits:
             fallback = (
                 f"No STIG confidently matched '{system_description}'. Call resolve_system "
-                f"or list_stigs to see candidates, or pass stig_ids explicitly."
+                f"or list_stigs to see candidates, or pass benchmark_ids explicitly."
             )
         else:
             fallback = (
@@ -430,7 +524,7 @@ def _resolve_scope(conn, system_description, stig_ids):
         [],
         [
             "No system supplied: returning controls without STIG steps. "
-            "Provide system_description or stig_ids to get fix/check steps."
+            "Provide system_description or benchmark_ids to get fix/check steps."
         ],
     )
 
@@ -575,14 +669,36 @@ def _provenance_notes(conn, resolved_systems):
     return notes
 
 
-def mitigations_for_technique(kb, technique_id, system_description=None, stig_ids=None, severity=None):
+def _counts_as_detectable(analytic, platforms):
+    return bool(analytic["detectable"] and (not platforms or analytic["applicable"]))
+
+
+def _defense_counts(mitigations, detection, platforms, log_sources):
+    analytics = detection["analytics"] if detection else []
+    counts = {"analytics": len(analytics)}
+    if platforms:
+        counts["applicable"] = sum(1 for a in analytics if a["applicable"])
+    if log_sources:
+        counts["detectable"] = sum(1 for a in analytics if _counts_as_detectable(a, platforms))
+    return {"mitigations": len(mitigations), "detection": counts}
+
+
+def _with_catalog(rows):
+    return [{**row, "catalog": "disa"} for row in rows]
+
+
+def defenses_for_technique(  # noqa: PLR0913
+    kb, technique_id, system_description=None, benchmark_ids=None, severity=None, platforms=None, log_sources=None
+):
     conn, not_ready = _answerable(kb)
     if not_ready:
         return not_ready
-    _check_stig_ids(stig_ids)
+    _check_benchmark_ids(benchmark_ids)
     severities = _check_severity(severity)
+    platforms = _check_platforms(conn, platforms)
+    log_sources = _check_log_sources(conn, log_sources)
     technique, notes = _technique_or_redirect(conn, technique_id)
-    scope, resolved_systems, scope_notes = _scope_context(conn, system_description, stig_ids)
+    scope, resolved_systems, scope_notes = _scope_context(conn, system_description, benchmark_ids)
     findings = {}
     controls, technique_notes = _technique_controls(
         conn, technique["id"], _ControlFindings(conn, scope, severities), findings
@@ -590,21 +706,39 @@ def mitigations_for_technique(kb, technique_id, system_description=None, stig_id
     if scope:
         technique_notes += [_no_rules_note([c["control_id"]], severities) for c in controls if not c["rules"]]
     findings = _cat_ordered(findings)
-    sources = {**_sources_block(conn), "kb_sha256": kb.sha256()}
+    mitigations = queries.mitigations_for_technique(conn, technique["id"])
+    detection = queries.detection_for_technique(conn, technique["id"], platforms, log_sources)
+    counts = _defense_counts(mitigations, detection, platforms, log_sources)
+    detect = None
+    if detection:
+        detect = {
+            "detection_strategy": detection["detection_strategy"],
+            **_listed_analytics(
+                detection["analytics"],
+                platforms,
+                log_sources,
+                lambda analytic: {"name": analytic["name"], "platforms": analytic["platforms"]},
+            ),
+        }
+    listed = _listed_findings(findings, _titled_cats(severities))
     return {
-        "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}),
+        "summary": _summary(findings, {c["control_id"]: c["rules"] for c in controls}, counts, _untitled(listed)),
         "technique": technique,
-        "resolved_systems": resolved_systems,
-        "controls": controls,
-        "findings": findings,
-        "notes": notes + scope_notes + technique_notes,
-        "sources": sources,
+        "resolved_systems": _with_catalog(resolved_systems),
+        "protect": {
+            "controls": {c["control_id"]: {k: v for k, v in c.items() if k != "control_id"} for c in controls},
+            "findings": listed,
+            "mitigations": mitigations,
+        },
+        "detect": detect,
+        "notes": notes + scope_notes + technique_notes + _titles_note(listed),
+        "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},
     }
 
 
-def _scope_context(conn, system_description, stig_ids):
+def _scope_context(conn, system_description, benchmark_ids):
     """The scope and the notes that hold for every technique answered against it."""
-    scope, resolved_systems, notes = _resolve_scope(conn, system_description, stig_ids)
+    scope, resolved_systems, notes = _resolve_scope(conn, system_description, benchmark_ids)
     notes += _provenance_notes(conn, resolved_systems)
     gap = _version_gap_note(_mapping_meta(conn))
     if gap:
@@ -683,7 +817,44 @@ def _cat_ordered(findings):
     return {f["rule_id"]: f for f in ordered}
 
 
-def _summary(findings, rules_by_control):
+def _benchmark_key(row):
+    return f"{row['stig_id']}/{row['stig_version']}"
+
+
+_TITLES_NOTE = (
+    "Titles are listed for CAT I only: the CAT II and III findings here carry no title, so do not name "
+    'or describe them without fetching it. Call again with severity=["II"] or ["III"] for their titles; '
+    "finding_details gives DISA's full text."
+)
+
+
+def _titled_cats(severities):
+    return set(severities) if severities else {"I"}
+
+
+def _listed_findings(findings, titled_cats):
+    """List-answer entries: the rule id is the key, resolved_systems describes the benchmark,
+    the CAT fixes the level, CCIs stay in finding_details, and titles come only for the CATs
+    the caller asked about (CAT I by default)."""
+    listed = {}
+    for rule_id, finding in findings.items():
+        cat = finding["severity"]["cat"]
+        entry = {"benchmark": _benchmark_key(finding), "group_id": finding["group_id"], "severity": cat}
+        if cat in titled_cats:
+            entry["title"] = finding["title"]
+        listed[rule_id] = entry
+    return listed
+
+
+def _untitled(listed):
+    return any("title" not in finding for finding in listed.values())
+
+
+def _titles_note(listed):
+    return [_TITLES_NOTE] if _untitled(listed) else []
+
+
+def _summary(findings, rules_by_control, defense_counts=None, untitled=False):
     """Counts and the CAT I ids, first in the answer: a client that spills a large result to a
     file shows the model only its opening characters. Stating the counts also spares the model
     counting long lists itself, which it gets wrong."""
@@ -695,12 +866,16 @@ def _summary(findings, rules_by_control):
     cat_i_findings = (f for f in findings.values() if f["severity"]["cat"] == "I")
     cat_i = list(dict.fromkeys(f["group_id"] or f["rule_id"] for f in cat_i_findings))
     with_rules = [control_id for control_id, rules in rules_by_control.items() if rules]
-    # The counts come before cat_i; the control id list goes after it, since a long one would
-    # push the CAT I ids out of that opening.
+    # The control id list goes last, since a long one would push the CAT I ids out of that
+    # opening.
     return {
         "findings": len(findings),
         "by_cat": by_cat,
+        # Beside the CAT counts so a model reading only the preview knows titles are missing.
+        **({"titles": "CAT I only"} if untitled else {}),
         "control_counts": {"mapped": len(rules_by_control), "with_rules": len(with_rules)},
+        # Every count goes before cat_i, whose id list can run past a client's preview.
+        **(defense_counts or {}),
         "cat_i": {"count": len(cat_i), "ids": cat_i},
         "controls_with_rules": with_rules,
     }
@@ -720,12 +895,113 @@ def _unresolved_actor(actor, match):
     return f"Unknown actor '{actor}'. Provide an ATT&CK group id (e.g. 'G0016') or a known name/alias."
 
 
-def techniques_for_actor(kb, actor, system_description=None, stig_ids=None, include_mitigations=False, severity=None):  # noqa: PLR0913
-    conn, not_ready = _answerable(kb)
-    if not_ready:
-        return not_ready
-    _check_stig_ids(stig_ids)
-    severities = _check_severity(severity)
+def _detect_class(detection, platforms, log_sources):
+    """Which Detect count a technique lands in, or None when neither filter was given. The
+    order is the partition: applicability is judged before detectability."""
+    analytics = detection["analytics"] if detection else []
+    if platforms:
+        analytics = [a for a in analytics if a["applicable"]]
+        if not analytics:
+            return "without_applicable_analytic"
+    if log_sources:
+        return "detectable" if any(a["detectable"] for a in analytics) else "undetectable"
+    return None
+
+
+def _gaps(technique, has_rules, scoped, detect_class):
+    """The coverage keys that count this technique as a gap, in coverage's order."""
+    gaps = []
+    if not technique["mitigations"]:
+        gaps.append("without_mitigation")
+    elif scoped and not has_rules:
+        gaps.append("mitigated_without_rules")
+    if detect_class in ("without_applicable_analytic", "undetectable"):
+        gaps.append(detect_class)
+    return gaps
+
+
+def _coverage(rows, scoped, platforms, log_sources):
+    """rows: (technique_dict, detect_class) per technique, each technique carrying its gaps."""
+    gaps = [gap for technique, _ in rows for gap in technique["gaps"]]
+    coverage = {"techniques": len(rows), "without_mitigation": gaps.count("without_mitigation")}
+    if scoped:
+        coverage["mitigated_without_rules"] = gaps.count("mitigated_without_rules")
+    if platforms:
+        coverage["without_applicable_analytic"] = gaps.count("without_applicable_analytic")
+    if log_sources:
+        coverage["detectable"] = [detect_class for _, detect_class in rows].count("detectable")
+        coverage["undetectable"] = gaps.count("undetectable")
+    return coverage
+
+
+def _listed_analytics(analytics, platforms, log_sources, entry):
+    """A list is present only when its filter was given: absent means not judged, empty means
+    none qualify."""
+    listed = {"analytics": {analytic["id"]: entry(analytic) for analytic in analytics}}
+    if platforms:
+        listed["applicable"] = [analytic["id"] for analytic in analytics if analytic["applicable"]]
+    if log_sources:
+        listed["detectable"] = [analytic["id"] for analytic in analytics if _counts_as_detectable(analytic, platforms)]
+    return listed
+
+
+def _attach_defenses(conn, technique, platforms, log_sources, mitigation_names):
+    """Adds the id-only defense fields to one technique; returns its detection block."""
+    mitigations = queries.mitigations_for_technique(conn, technique["technique_id"])
+    for mitigation in mitigations:
+        mitigation_names.setdefault(mitigation["id"], {"name": mitigation["name"]})
+    technique["mitigations"] = [m["id"] for m in mitigations]
+    detection = queries.detection_for_technique(conn, technique["technique_id"], platforms, log_sources)
+    technique["detection_strategy"] = detection["detection_strategy"]["id"] if detection else None
+    technique.update(
+        _listed_analytics(
+            detection["analytics"] if detection else [], platforms, log_sources, lambda analytic: analytic["platforms"]
+        )
+    )
+    return detection
+
+
+def _actor_defense_summary(rows, detections, scoped, platforms, log_sources):
+    totals = _defense_counts(
+        [m for technique, _ in rows for m in technique["mitigations"]],
+        {"analytics": [a for d in detections if d for a in d["analytics"]]},
+        platforms,
+        log_sources,
+    )
+    return {"coverage": _coverage(rows, scoped, platforms, log_sources), **totals}
+
+
+def _attach_controls(conn, technique, control_findings, findings, controls):
+    """Adds notes and controls to one technique; returns whether any control has rules."""
+    listed, technique["notes"] = _technique_controls(conn, technique["technique_id"], control_findings, findings)
+    # Source belongs to the technique-control pair; name, family and rules to the control.
+    technique["controls"] = {}
+    for control in listed:
+        for source in control["source"]:
+            technique["controls"].setdefault(source, []).append(control["control_id"])
+        controls.setdefault(
+            control["control_id"], {k: control[k] for k in ("name", "family", "rules", "via") if k in control}
+        )
+    return any(control["rules"] for control in listed)
+
+
+def _expand_techniques(conn, techniques, control_findings, collected, filters):
+    """Attaches controls, defenses and gaps to each technique, filling the shared findings,
+    controls and mitigation-name maps; returns (technique, detect_class) rows and detections."""
+    findings, controls, mitigation_names = collected
+    scoped, platforms, log_sources = filters
+    rows, detections = [], []
+    for technique in techniques:
+        has_rules = _attach_controls(conn, technique, control_findings, findings, controls)
+        detection = _attach_defenses(conn, technique, platforms, log_sources, mitigation_names)
+        detect_class = _detect_class(detection, platforms, log_sources)
+        technique["gaps"] = _gaps(technique, has_rules, scoped, detect_class)
+        rows.append((technique, detect_class))
+        detections.append(detection)
+    return rows, detections
+
+
+def _resolved_actor(conn, actor):
     match = queries.resolve_actor(conn, actor)
     if len(match.groups) != 1:
         raise CallerError(_unresolved_actor(actor, match))
@@ -734,43 +1010,67 @@ def techniques_for_actor(kb, actor, system_description=None, stig_ids=None, incl
         resolved["matched_as"] = match.matched_as
     if match.also_matches:
         resolved["also_matches"] = match.also_matches
+    return resolved
+
+
+def techniques_for_actor(  # noqa: PLR0913
+    kb,
+    actor,
+    system_description=None,
+    benchmark_ids=None,
+    include_defenses=False,
+    severity=None,
+    platforms=None,
+    log_sources=None,
+):
+    """summary.mitigations counts mitigation references across techniques: a technique with two
+    mitigations counts two."""
+    conn, not_ready = _answerable(kb)
+    if not_ready:
+        return not_ready
+    _check_benchmark_ids(benchmark_ids)
+    severities = _check_severity(severity)
+    platforms = _check_platforms(conn, platforms)
+    log_sources = _check_log_sources(conn, log_sources)
+    resolved = _resolved_actor(conn, actor)
     techniques = queries.techniques_for_actor(conn, resolved["id"])
     sources = {**_sources_block(conn), "kb_sha256": kb.sha256()}
-    if not include_mitigations:
+    if not include_defenses:
         return {
             "summary": {"techniques": len(techniques)},
             "actor": resolved,
             "techniques": techniques,
             "sources": sources,
         }
-    scope, resolved_systems, notes = _scope_context(conn, system_description, stig_ids)
-    findings, controls = {}, {}
-    control_findings = _ControlFindings(conn, scope, severities)
-    for technique in techniques:
-        listed, technique["notes"] = _technique_controls(conn, technique["technique_id"], control_findings, findings)
-        # Source belongs to the technique-control pair; name, family and rules to the control.
-        technique["controls"] = {}
-        for control in listed:
-            for source in control["source"]:
-                technique["controls"].setdefault(source, []).append(control["control_id"])
-            controls.setdefault(
-                control["control_id"], {k: control[k] for k in ("name", "family", "rules", "via") if k in control}
-            )
+    scope, resolved_systems, notes = _scope_context(conn, system_description, benchmark_ids)
+    filters = (bool(scope), platforms, log_sources)
+    findings, controls, mitigation_names = {}, {}, {}
+    rows, detections = _expand_techniques(
+        conn, techniques, _ControlFindings(conn, scope, severities), (findings, controls, mitigation_names), filters
+    )
     empty = sorted(control_id for control_id, control in controls.items() if not control["rules"])
     if scope and empty:
         notes.append(_no_rules_note(empty, severities))
     findings = _cat_ordered(findings)
+    defense_counts = _actor_defense_summary(rows, detections, *filters)
+    listed = _listed_findings(findings, _titled_cats(severities))
     return {
         "summary": {
             "techniques": len(techniques),
-            **_summary(findings, {control_id: control["rules"] for control_id, control in controls.items()}),
+            **_summary(
+                findings,
+                {control_id: control["rules"] for control_id, control in controls.items()},
+                defense_counts,
+                _untitled(listed),
+            ),
         },
         "actor": resolved,
-        "resolved_systems": resolved_systems,
+        "resolved_systems": _with_catalog(resolved_systems),
         "techniques": techniques,
         "controls": controls,
-        "findings": findings,
-        "notes": notes,
+        "findings": listed,
+        "mitigations": dict(sorted(mitigation_names.items())),
+        "notes": notes + _titles_note(listed),
         "sources": sources,
     }
 
@@ -787,10 +1087,54 @@ def finding_details(kb, ids):
         named = ", ".join(f"'{finding_id}'" for finding_id in ids)
         raise CallerError(
             f"No finding in this knowledge base has the id {named}. Pass a rule id "
-            f"(SV-...r..._rule) or V- id exactly as a mitigations_for_technique or "
+            f"(SV-...r..._rule) or V- id exactly as a defenses_for_technique or "
             f"techniques_for_actor answer lists it under findings."
         )
     return {"findings": rows, "not_found": not_found, "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()}}
+
+
+_MAX_DEFENSE_IDS = 10
+
+
+def _check_defense_ids(ids):
+    if not ids:
+        raise CallerError(
+            "ids must name at least one defense: an M- (mitigation), DET- (detection strategy) or AN- "
+            "(analytic) id as a defenses_for_technique or techniques_for_actor answer lists them."
+        )
+    if len(ids) > _MAX_DEFENSE_IDS:
+        raise CallerError(
+            f"ids names {len(ids)} defenses, over the limit of {_MAX_DEFENSE_IDS}. A detection strategy "
+            f"expands to every analytic with its log sources and tunables, so split them across calls of "
+            f"at most {_MAX_DEFENSE_IDS}."
+        )
+
+
+def defense_details(kb, ids, technique_id=None):
+    conn, not_ready = _answerable(kb)
+    if not_ready:
+        return not_ready
+    _check_defense_ids(ids)
+    technique, notes = (None, [])
+    if technique_id is not None:
+        technique, notes = _technique_or_redirect(conn, technique_id)
+    details = queries.defense_details(conn, ids, technique["id"] if technique else None)
+    matched = {item["id"] for group in details.values() for item in group}
+    not_found = [defense_id for defense_id in ids if defense_id.strip().upper() not in matched]
+    if not matched:
+        named = ", ".join(f"'{defense_id}'" for defense_id in ids)
+        raise CallerError(
+            f"No mitigation, detection strategy or analytic in this knowledge base has the id {named}. "
+            f"Pass M-, DET- or AN- ids exactly as a defenses_for_technique or techniques_for_actor answer "
+            f"lists them."
+        )
+    return {
+        **details,
+        "not_found": not_found,
+        "technique": technique,
+        "notes": notes,
+        "sources": {**_sources_block(conn), "kb_sha256": kb.sha256()},
+    }
 
 
 def resolve_system(kb, system_description, limit=5):

@@ -9,8 +9,10 @@ texts under licenses/ with it.
 MITRE ATT&CK®
 -------------
 
-Technique names, descriptions, and ids ingested from the MITRE ATT&CK®
-Enterprise STIX bundle (`enterprise-attack.json`) originate with MITRE and
+Technique, mitigation, detection strategy, analytic and data component
+names, descriptions, and ids, and analytic log source names, channels and
+mutable elements, ingested from the MITRE ATT&CK® Enterprise STIX
+bundle (`enterprise-attack.json`) originate with MITRE and
 carry the following statement, embedded in that bundle by MITRE:
 
     Copyright 2015-2026, The MITRE Corporation. MITRE ATT&CK and ATT&CK are

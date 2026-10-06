@@ -476,6 +476,32 @@ def _arbitration_findings(conn, summary, parsed_pairs):
     return findings
 
 
+_DEFENSE_TABLES = (
+    "mitigations",
+    "technique_mitigation",
+    "detection_strategies",
+    "analytics",
+    "analytic_log_sources",
+    "data_components",
+)
+
+
+def defense_counts(conn):
+    return {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in _DEFENSE_TABLES}  # noqa: S608
+
+
+def _defense_findings(conn):
+    findings = []
+    for table, count in defense_counts(conn).items():
+        if count == 0:
+            findings.append(
+                Finding("invariants", ERROR, f"{table} holds 0 rows; the ATT&CK defensive data did not load")
+            )
+        else:
+            findings.append(Finding("invariants", INFO, f"{table} holds {count} rows"))
+    return findings
+
+
 def phase_invariants(conn, summary, parsed_pairs=()):
     """Phase 3: properties that must hold of any corpus build, at any size."""
     findings = []
@@ -553,6 +579,7 @@ def phase_invariants(conn, summary, parsed_pairs=()):
                 f"how they title benchmarks, stig_parser.document_kind needs a new rule",
             )
         )
+    findings.extend(_defense_findings(conn))
     return findings
 
 

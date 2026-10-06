@@ -115,9 +115,57 @@ CREATE TABLE notices (
     text  TEXT NOT NULL
 );
 
+CREATE TABLE mitigations (
+    mitigation_id  TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    description    TEXT
+);
+
+CREATE TABLE technique_mitigation (
+    technique_id   TEXT NOT NULL REFERENCES techniques(technique_id),
+    mitigation_id  TEXT NOT NULL REFERENCES mitigations(mitigation_id),
+    description    TEXT,
+    PRIMARY KEY (technique_id, mitigation_id)
+);
+
+CREATE TABLE detection_strategies (
+    detection_strategy_id  TEXT PRIMARY KEY,
+    technique_id           TEXT NOT NULL REFERENCES techniques(technique_id),
+    name                   TEXT NOT NULL
+);
+
+CREATE TABLE data_components (
+    data_component_id  TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    description        TEXT
+);
+
+-- platforms is a comma string like techniques.tactics; mutable_elements is JSON because
+-- its descriptions contain commas and nothing queries it.
+CREATE TABLE analytics (
+    analytic_id            TEXT PRIMARY KEY,
+    detection_strategy_id  TEXT NOT NULL REFERENCES detection_strategies(detection_strategy_id),
+    name                   TEXT,
+    description            TEXT,
+    platforms              TEXT,
+    mutable_elements       TEXT
+);
+
+-- channel defaults to '' rather than NULL so the primary key holds for a source with none.
+CREATE TABLE analytic_log_sources (
+    analytic_id        TEXT NOT NULL REFERENCES analytics(analytic_id),
+    name               TEXT NOT NULL,
+    channel            TEXT NOT NULL DEFAULT '',
+    data_component_id  TEXT REFERENCES data_components(data_component_id),
+    PRIMARY KEY (analytic_id, name, channel)
+);
+
 CREATE INDEX idx_stig_rules_stig ON stig_rules(stig_id, stig_version);
 CREATE INDEX idx_stig_rules_sev  ON stig_rules(severity_cat);
 CREATE INDEX idx_tc_control      ON technique_control(control_id);
 CREATE INDEX idx_ccictl_control  ON cci_control(control_id);
 CREATE INDEX idx_rulecci_cci     ON rule_cci(cci_id);
 CREATE INDEX idx_at_technique    ON actor_technique(technique_id);
+CREATE INDEX idx_tm_technique    ON technique_mitigation(technique_id);
+CREATE INDEX idx_ds_technique    ON detection_strategies(technique_id);
+CREATE INDEX idx_als_name        ON analytic_log_sources(name);

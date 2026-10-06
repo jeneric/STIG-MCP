@@ -1,11 +1,11 @@
 {
   "name": "stig-mcp",
   "displayName": "STIG-MCP",
-  "version": "0.1.3",
-  "description": "MCP server mapping MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps",
+  "version": "0.2.0",
+  "description": "MCP server: MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps, mitigations and detections",
   "author": { "name": "Eric Miller" },
   "homepage": "https://github.com/jeneric/STIG-MCP",
   "repository": "https://github.com/jeneric/STIG-MCP",
   "license": "MIT",
-  "keywords": ["mcp", "stig", "mitre-attack", "nist-800-53", "disa"]
+  "keywords": ["mcp", "stig", "mitre-attack", "nist-800-53", "disa", "detection"]
 }

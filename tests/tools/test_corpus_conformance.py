@@ -303,6 +303,9 @@ def _permissive_kb(rows):
         "CREATE TABLE stigs(stig_id TEXT, version TEXT, origin TEXT, source_artifact TEXT, release_label TEXT)"
     )
     conn.executemany("INSERT INTO stigs VALUES(?, ?, ?, ?, ?)", rows)
+    for table in corpus_conformance._DEFENSE_TABLES:
+        conn.execute(f"CREATE TABLE {table}(id TEXT)")  # noqa: S608
+        conn.execute(f"INSERT INTO {table} VALUES('x')")  # noqa: S608
     return conn
 
 
@@ -1485,3 +1488,28 @@ def test_phase_margin__a_corpus_holding_no_benchmarks__reports_nothing(tmp_path)
     # before _populate runs, so an empty corpus cannot be built through build_kb at all.
     with closing(create_db(tmp_path / "empty.sqlite")) as conn:
         assert corpus_conformance.phase_margin(conn) == []
+
+
+def test_phase_invariants__defense_tables_empty__is_an_error_naming_the_table(kb_path, tmp_path):
+    copy = tmp_path / "kb.sqlite"
+    shutil.copyfile(kb_path, copy)
+    with closing(sqlite3.connect(copy)) as writable:
+        writable.execute("DELETE FROM analytic_log_sources")
+        writable.commit()
+    with closing(corpus_conformance.open_kb(copy)) as conn:
+        findings = corpus_conformance.phase_invariants(conn, {})
+    messages = [f.message for f in findings if f.severity == corpus_conformance.ERROR]
+    assert any("analytic_log_sources holds 0 rows" in m for m in messages)
+
+
+def test_defense_counts__the_fixture__reports_every_table(kb_path):
+    with closing(corpus_conformance.open_kb(kb_path)) as conn:
+        counts = corpus_conformance.defense_counts(conn)
+    assert counts == {
+        "mitigations": 2,
+        "technique_mitigation": 3,
+        "detection_strategies": 2,
+        "analytics": 3,
+        "analytic_log_sources": 5,
+        "data_components": 2,
+    }

@@ -2,7 +2,8 @@
 
 Adds the [stig-mcp](https://github.com/jeneric/STIG-MCP) MCP server to Claude Code. It maps
 MITRE ATT&CK® techniques and actors to NIST 800-53r5 controls and the DISA STIG check and fix
-steps for the systems you name.
+steps for the systems you name, and ATT&CK's own mitigations and detections for the Protect
+and Detect functions of the NIST CSF.
 
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/): the server runs as
 `uvx stig-mcp==<version>`.
