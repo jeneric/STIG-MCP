@@ -10,7 +10,9 @@ about, and the answer gives you:
   severe first, with DISA's check and fix text on request;
 - ATT&CK's own mitigations, and which of its detections work with the logs you collect.
 
-It does not scan or connect to your systems. The [user guide](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#summary) explains what it
+It does not scan or connect to your systems. Its answers come from a knowledge base, a local
+database of about 6 MB built from those public sources, which you install once. The
+[user guide](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#summary) explains what it
 does and shows [three ways to use it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#three-ways-to-use-it): as a security controls
 assessor, a system owner, or a SOC analyst.
 
@@ -56,10 +58,10 @@ If that doesn't work, see [troubleshooting](https://github.com/jeneric/STIG-MCP/
 
 With the knowledge base installed, try:
 
-1. `What DISA STIG steps mitigate T1078 on Windows 11?`
-2. `Which ATT&CK techniques does APT29 use?`
-3. `Which STIG benchmarks apply to RHEL 9?`
-4. `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
+1. System owner: `What DISA STIG steps mitigate T1078 on Windows 11?`
+2. Security controls assessor: `Which ATT&CK techniques does APT29 use?`
+3. Anyone, to find the right STIG: `Which STIG benchmarks apply to RHEL 9?`
+4. SOC analyst: `What can I detect of APT29 on Windows Server 2022 with Security and Sysmon logs?`
 
 [More example prompts](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#more-example-prompts) are in the user guide, with
 [how to get more out of it](https://github.com/jeneric/STIG-MCP/blob/main/docs/user-guide.md#how-do-i-get-more-out-of-it) and
