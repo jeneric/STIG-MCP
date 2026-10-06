@@ -8,7 +8,7 @@ about, and the answer gives you:
 - the NIST SP 800-53 security controls that mitigate it;
 - the DISA STIG configuration rules that implement those controls on that system, most
   severe first, with DISA's check and fix text on request;
-- ATT&CK's own mitigations, and which of its detections work with the logs you collect.
+- MITRE ATT&CK's own mitigations, and which of its detections work with the logs you collect.
 
 It does not scan or connect to your systems. Its answers come from a knowledge base, a local
 database of about 6 MB built from those public sources, which you install once. The
