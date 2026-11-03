@@ -276,7 +276,7 @@ def _take_catalog(dest_dir, open_url, _opener):
 
 
 def selection(entries):
-    """Everything worth downloading from one index read: the current library compilation, the
+    """Everything worth downloading from one catalog read: the current library compilation, the
     sunset archive, the CCI list, and the newest loose STIG of each product."""
     # A module-level import here breaks `python -m stig_mcp.ingest.fetch` and the
     # stig-mcp-fetch console script outright, because they import this module first.
@@ -354,7 +354,7 @@ def preflight(dest_dir, entries, disk_usage=None):
 
 
 def write_manifest(dest_dir, entries, *, vouched_for=None):
-    """What the fetch took and what the index said about it, for --check and --refresh to diff.
+    """What the fetch took and what the catalog said about it, for --check and --refresh to diff.
 
     vouched_for names the entries whose file on disk the caller has just established: skipped
     because the recorded length still matched, or downloaded cleanly. Every OTHER entry
@@ -737,15 +737,15 @@ def _supersedes(arriving, name):
     deleting it. Both names share a _prune_key, so the comparison stays inside one product and
     one version scheme.
 
-    A loose benchmark is replaced only by a LATER release. An index that regresses, DISA pulling
-    a release or one bad read of the page, must not cost the newer local copy: the rule prune
+    A loose benchmark is replaced only by a LATER release. A catalog that regresses, DISA pulling
+    a release or one bad read of the response, must not cost the newer local copy: the rule prune
     rests on is that a superseded file is strictly worse than the one replacing it, and an older
     arrival is not better at all.
 
-    A LIBRARY compilation is replaced by whichever one the index carries, older or newer. That
+    A LIBRARY compilation is replaced by whichever one the catalog carries, older or newer. That
     asymmetry is forced rather than an oversight: inventory.classify raises on two artifacts of
     kind "library", so exactly one may exist, and keeping a newer local one would mean deleting
-    the copy this very run downloaded and recorded. The index is the authority on which quarter
+    the copy this very run downloaded and recorded. The catalog is the authority on which quarter
     that is.
 
     A SUNSET archive is never replaced at all. classify tolerates two of those and ingests both
@@ -829,7 +829,7 @@ def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
     re-fetched once deleted, and the server already labels what it yields (_provenance_notes
     tells a caller the answer came from a local artifact that is not in the current library
     compilation). So a file is deleted only when a replacement for it arrived and _supersedes
-    it, never merely because the index stopped carrying its name. Loose releases and
+    it, never merely because the catalog stopped carrying its name. Loose releases and
     compilations answer that question differently, and _supersedes says why.
 
     Only names the manifest carries are ever considered, which is the whole bound on what this
@@ -853,7 +853,7 @@ def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
     independent of the caller's ordering rather than a guard against anything _run_refresh can
     produce: after a fetch_disa that returned, every entry verifies.
 
-    drop_withdrawn additionally deletes what the index no longer carries at all, unless the
+    drop_withdrawn additionally deletes what the catalog no longer carries at all, unless the
     name is in NEVER_DROPPED, for a CI build that must ship only what DISA currently publishes.
     """
     dest_dir = Path(dest_dir)
@@ -879,7 +879,7 @@ def main():
     action.add_argument(
         "--check",
         action="store_true",
-        help="report what DISA's index, ATT&CK, the CTID mapping and the NIST catalog have that the "
+        help="report what DISA's catalog, ATT&CK, the CTID mapping and the NIST catalog have that the "
         "last fetch does not, download nothing; exits 10 if updates are available, 3 if nothing is "
         "to take but a source printed as unknown could not be checked, else 0",
     )
@@ -893,8 +893,9 @@ def main():
     parser.add_argument(
         "--drop-withdrawn",
         action="store_true",
-        help="with --refresh, also delete recorded DISA files the index no longer carries (kept by "
-        "default); for building a release from current publications only",
+        help="with --refresh, also delete recorded DISA files the catalog no longer carries (kept by "
+        "default), refused when that would drop over 25%% of the recorded files; for building a "
+        "release from current publications only",
     )
     args = parser.parse_args()
     if args.drop_withdrawn and not args.refresh:
@@ -937,7 +938,7 @@ def _product_key(name):
     Mirrors catalog.newest_per_product's own key rather than matching on product text alone: a
     V/R release and a Y/M release of the same product are not comparable (see
     catalog.release_of's docstring), so a product publishing under both at once (real products
-    on the live index do) must never have a V/R withdrawal read as superseded by an unrelated
+    in the live catalog do) must never have a V/R withdrawal read as superseded by an unrelated
     Y/M release just because their names share a prefix.
 
     Reads the scheme off catalog.release_of rather than off the match groups here, so the key
@@ -955,7 +956,7 @@ def _product_key(name):
 def _withdrawn_line(name, new_names):
     """The text to print for one withdrawn name: qualified with what replaced it when the
     withdrawal is really just a version bump (the common case a quarterly check hits), bare
-    when DISA genuinely dropped the name from the index.
+    when DISA genuinely dropped the name from the catalog.
 
     Display only. The "withdrawn" list names every entry selection does not keep, whatever
     this prints; nothing downstream reads it, and prune deletes on supersession rather than
@@ -1003,10 +1004,10 @@ def _run_check(dest_dir, opener=None):
     the sources have changed. Only a new or resized entry, something the next fetch would
     actually transfer, exits 10.
 
-    opener mirrors fetch_disa's own injection point, so a test reads the index from a fake
-    opener the same way every other test in this module reaches the DISA index: without
+    opener mirrors fetch_disa's own injection point, so a test reads the catalog from a fake
+    opener the same way every other test in this module reaches DISA: without
     patching urllib.request.urlopen or anything else global. main() calls this with no
-    opener, so a real run reads the live index.
+    opener, so a real run reads the live catalog.
 
     ATT&CK, CTID and the catalog are checked too. A source that cannot be reached, DISA
     included, prints unknown with the whole reason and is named in the closing line. It does
@@ -1107,7 +1108,7 @@ def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
     if changes["new"] or changes["resized"] or result["deleted"] or result["dropped"] or taken:
         print("Sources changed. Now run stig-mcp-ingest.")
     else:
-        # The commonest run of all, on an index that has not moved since the last one. Sending
+        # The commonest run of all, on a catalog that has not moved since the last one. Sending
         # the operator to rebuild the knowledge base for that would cost an hour for nothing,
         # and a retained withdrawal is not a change to the files the ingest reads.
         print("Sources were already current; nothing to rebuild.")

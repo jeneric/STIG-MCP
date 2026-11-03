@@ -32,14 +32,13 @@ that only a corpus of that size can surface; it is **not** part of any
 supported workflow, is not run in CI, and is not wired to `stig-mcp-fetch`. Running it is a
 deliberate, occasional check, not something day-to-day development depends on.
 
-The published directory holds 1,032 file rows, measured on 2026-08-14 against
-a saved copy of the directory listing (removed with the listing parser): 613
-benchmark-tier product zips, 10 compilations, 323 adversarial, 70 junk, and 16 rows that are
-not zips at all and are tiered out. Junk is the largest tier by volume at 5.78 GiB, and the
+The published directory held 1,032 file rows when measured on 2026-08-14 from DISA's
+directory listing: 613 benchmark-tier product zips, 10 compilations, 323 adversarial, 70
+junk, and 16 rows that are not zips at all and are tiered out. Junk is the largest tier by volume at 5.78 GiB, and the
 nine STIG Viewer desktop application archives that land there are only 1.31 GiB of it: the
 SCC scanner bundles are the bulk, so junk would still be the largest tier without them. The
 documented command below therefore runs several builds, not one: the default `benchmark` tier
-stages those 613 product zips, about 1.1 GiB by the index's advertised sizes and confirmed
+stages those 613 product zips, about 1.1 GiB by the sizes that listing advertised and confirmed
 against 612 of them staged on disk, and every one of them is reused across every build;
 `--tier compilation` separately stages all ten compilations, about 2.8 GiB, being nine
 historical SRG-STIG Library releases plus the Rev 4 sunset archive. The harness runs one
@@ -47,7 +46,8 @@ build per library, nine builds today, each paired with the sunset archive (see b
 full run means nine complete passes of the ingest pipeline over the product corpus.
 
 Four commands, run in order. The manifest step comes first because it downloads nothing;
-it only tiers the published listing:
+it only tiers the published listing. DISA's directory listing is closed, so
+`tools.corpus_manifest` cannot read the live server at present:
 
     uv run python -m tools.corpus_manifest --out /tmp/corpus/manifest.json
     uv run python -m tools.corpus_fetch --manifest /tmp/corpus/manifest.json --dest /tmp/corpus/files

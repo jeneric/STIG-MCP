@@ -144,14 +144,18 @@ version: when the file is present the ingest records the date as `ctid_attack_re
 when it is absent the ingest records no date. The catalog supplies control names, families, and the
 links between a base control and its enhancements; without it, control rows are id-only.
 
-The second comes from one read of DISA's published index at
-<https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/>, from which it selects the current
-SRG-STIG Library Compilation, the Rev 4 sunset compilation, the CCI list, and the newest
-loose STIG zip of each product. Measured against the live index on 2026-08-14, that is 272
-files and about 0.95 GiB; both figures drift as DISA publishes, so treat them as a scale
-rather than a number to check against.
-Requests are spaced by `--delay` seconds, 0.25 by default, because every one of them goes to
-a single government host.
+The second comes from one read of DISA's STIGs document catalog on `www.cyber.mil` (a POST to
+its Apex endpoint, the same call the STIGs downloads page makes), from which it selects the
+current SRG-STIG Library Compilation, the Rev 4 sunset compilation, the CCI list, and the
+newest loose STIG zip of each product. The zips themselves come from
+<https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/>. The catalog gives names and upload
+dates but no sizes, so the fetch sends one HEAD request per selected file and takes its
+`Content-Length` as the exact length. Measured against DISA's former directory listing on 2026-08-14,
+that is 272 files and about 0.95 GiB; both figures drift as DISA publishes, so treat them as a
+scale rather than a number to check against.
+`--delay` spaces the downloads by that many seconds, 0.25 by default, because every one of
+them goes to a single government host. The HEAD requests go back to back, with no delay
+between them.
 
 Before the first byte it checks free space, and refuses if there is less than 2 GiB or less
 than twice what this run would transfer, whichever is larger. The floor covers the ingest's
@@ -159,22 +163,24 @@ temporary extraction and the knowledge base as well as the downloads themselves.
 `STIG_MCP_DATA` at a larger volume if the sources directory sits on a small one.
 
 Each run records what it took in `.stig-mcp-manifest.json` beside the files, and a later run
-skips anything already on disk at its recorded length. An interrupted fetch therefore
+skips anything already on disk at its recorded length. Each run compares the file's current
+HEAD length with the length recorded for what it saved, so a same-name reissue makes them
+differ and the next fetch downloads the new copy. An interrupted fetch therefore
 resumes rather than starting over: run the same command again. The manifest is written even
 when a download fails, which is what makes that work.
 
 A single dropped connection need not end the run at all. The DISA half of the fetch
-tries each download and the index read up to 4 times, waiting 5, 15 and 45 seconds between
-tries, when the failure is one a retry can heal: a reset, refused or dropped connection,
-a timeout, a DNS or other network error, or HTTP 429, 500, 502, 503 or 504. A certificate
+tries each download, HEAD request and catalog read up to 4 times, waiting 5, 15 and 45
+seconds between tries, when the failure is one a retry can heal: a reset, refused or dropped
+connection, a timeout, a DNS or other network error, or HTTP 429, 500, 502, 503 or 504. A certificate
 error, any other HTTP error and the refusal of a `CUI_` URL fail at once. Each retry prints
-one line to stderr naming the file, or the index, and the attempt it is about to make. This
+one line to stderr naming the file, or the catalog, and the attempt it is about to make. This
 holds for a plain fetch and for `--refresh` alike. The three public sources are not retried,
 and neither is `--check`, which reports a source it cannot reach instead.
 
-DISA publishes the CCI list only as `U_CCI_List.zip` and the ingest reads `U_CCI_List.xml`,
-so the fetch extracts that one member into the sources directory and prints its path with
-the rest. It extracts from whatever archive is on disk rather than only from one it has just
+DISA publishes the CCI list as `CCI_List.zip`, whose member `CCI_List.xml` the ingest reads
+as `U_CCI_List.xml`, so the fetch extracts that one member under that name into the sources
+directory and prints its path with the rest. It extracts from whatever archive is on disk rather than only from one it has just
 downloaded, so a run that skips the download because the manifest still matches restores a
 deleted XML too. Leave the zip where it is: the ingest opens it, finds no XCCDF benchmark,
 and logs one line about it. That costs about 0.04 seconds: the ingest decompresses and parses
@@ -188,6 +194,21 @@ canceling a fetch prints no guidance at all. What it prints is the DISA half alo
 library compilation, the CCI list, and loose product zips. "Placing the sources by hand"
 below is a longer list, because it also covers the three JSON sources this command takes
 from GitHub before it ever reaches DISA.
+
+#### If the catalog read fails
+
+Two errors name a change on DISA's side, and each says what to compare.
+
+- **"The Apex class id changes when DISA redeploys it".** The catalog call is addressed to
+  an Apex class by record id, and DISA changes that id when it redeploys the page. Update
+  `CATALOG_CLASSNAME` in `stig_mcp/ingest/catalog.py`. To find the new id, open the
+  STIGs downloads page (<https://www.cyber.mil/stigs/downloads>), find its
+  `sTIGs_Document_Library_view` view bundle in the browser's developer tools, and read the
+  `getApexInvoker(...)` line for `getCyberDocumentCatalogByDocumentLibrary`: the class id is
+  its first argument, in the form `@udd/01p...`.
+- **"no zip rows".** The call worked, but no row has a `DownloadLink` under `ZIP_BASE`
+  ending in `.zip`. The row shape or the download location changed, not the class id: compare
+  a row of the live response with `DownloadLink` and `ZIP_BASE` in the same file.
 
 ### 2. Ingest
 
@@ -270,12 +291,12 @@ Put these in `stig_mcp/data/sources/`, then run `uv run stig-mcp-ingest`:
   JSON file without `metadata.attack_version` does this, and so does a CSV mapping, which
   carries no version at all (`stig-mcp-ingest` reads `ctid_mappings.json` as JSON; the CSV
   form is read only when the ingest is driven from Python with a `.csv` path).
-- **DISA CCI list.** Download `U_CCI_List.zip` and extract `U_CCI_List.xml` from it. The XML
-  is what the ingest reads, and the zip is what DISA publishes, so on this path you unpack it
-  yourself:
+- **DISA CCI list.** Download `CCI_List.zip` and extract `CCI_List.xml` from it as
+  `U_CCI_List.xml`. The XML is what the ingest reads, and the zip is what DISA publishes, so
+  on this path you unpack it yourself:
 
       cd stig_mcp/data/sources
-      unzip -o U_CCI_List.zip U_CCI_List.xml
+      unzip -p CCI_List.zip CCI_List.xml > U_CCI_List.xml
 
   Placing the XML alone is enough on this path. If you keep the zip beside it, the ingest
   opens it, finds no XCCDF benchmark, and logs one line about it.
@@ -328,24 +349,25 @@ Download it into `sources/`. From there you have two options:
 
 `stig-mcp-fetch` carries two mutually exclusive flags for maintaining a sources directory
 it has already populated; neither builds a knowledge base. `--check` reads all four
-sources, ATT&CK, the CTID mapping, the NIST 800-53 catalog and DISA's index. `--refresh`
+sources, ATT&CK, the CTID mapping, the NIST 800-53 catalog and DISA's catalog. `--refresh`
 reads the same three public sources before it ever reaches DISA; unlike `--check`, its own
-read of the DISA index is not isolated the same way, so a failure there raises instead of
+read of the DISA catalog is not isolated the same way, so a failure there raises instead of
 printing `unknown`.
 
 ### `--check`: what has moved, downloading nothing
 
     uv run stig-mcp-fetch --check
 
-Prints one line per difference between the index and the manifest the last fetch wrote,
-labeled `new`, `resized` or `withdrawn`, then a closing line. **The exit code is the part
+Prints one line per difference between the catalog and the manifest the last fetch wrote,
+labeled `new`, `resized` or `withdrawn`, then a closing line. A file DISA reissued under the
+same name is reported as `resized`. **The exit code is the part
 worth scripting against**, which is why it is here and not only in `--help`:
 
 | exit | meaning |
 |---|---|
 | 0 | every source was checked and nothing is to download. Either all are current, or DISA has only withdrawn names, which changes nothing a fetch would transfer. |
 | 3 | nothing is to download from the sources it could check, but at least one printed `unknown` with the reason it could not be reached. The closing line carries "Could not check:" followed by each such source. Re-run once the network or upstream recovers. |
-| 10 | something new or resized is available, on DISA's index or on ATT&CK, the CTID mapping or the catalog. The closing line names the next command, and any source it could not check: a source it could not reach never masks a 10, so a script still refreshes what is available. |
+| 10 | something new or resized is available, in DISA's catalog or on ATT&CK, the CTID mapping or the catalog. The closing line names the next command, and any source it could not check: a source it could not reach never masks a 10, so a script still refreshes what is available. |
 
 A usage error exits 2, as for any command-line tool; 3 is kept distinct from it.
 
@@ -362,7 +384,7 @@ version is recorded` and counts as something to take. The bytes already match, s
 `--refresh` downloads the file again only to record its version; that second download is
 the known cost. (The `check_sources` tool answers a different question,
 whether a newer knowledge-base release is published; see the [user guide](user-guide.md),
-"Checking for a newer knowledge base".) A source it cannot reach, DISA's index included,
+"Checking for a newer knowledge base".) A source it cannot reach, DISA's catalog included,
 prints `unknown` with the whole reason instead, however long, since the remedy is often at
 its end. That source sets the exit code to 3 unless something else is to take; only a `new`
 or `resized` DISA entry, or a public source reporting a change, gives 10. The closing line
@@ -376,7 +398,7 @@ artifact as `new`, and exits 10.
     uv run stig-mcp-fetch --refresh
 
 Takes each public source `--check` reports as available, ATT&CK, the CTID mapping or the
-catalog, then downloads what changed on the DISA index and deletes the local files those
+catalog, then downloads what changed in the DISA catalog and deletes the local files those
 arrivals supersede, printing how many it fetched, deleted and retained, and with
 `--drop-withdrawn` how many it dropped.
 
@@ -404,16 +426,19 @@ Properties worth knowing before you schedule it:
 
 What it deletes is deliberately narrow. Without `--drop-withdrawn`, a file is removed only
 when a replacement for it actually arrived and is verified on disk, never merely because the
-index stopped carrying its name. **A product DISA has withdrawn keeps its local copy**,
+catalog stopped carrying its name. **A product DISA has withdrawn keeps its local copy**,
 because that copy is coverage that cannot be fetched again, and the server already labels an
 answer that came from an artifact the current library no longer ships. Those retentions are
 counted in the closing summary.
 
 `--drop-withdrawn` changes exactly that, and applies only with `--refresh`: given alone it is
 a usage error and exits 2. It also deletes every DISA file the manifest recorded that the
-index no longer carries and no arrival superseded, and names each one it dropped. The CCI list
+catalog no longer carries and no arrival superseded, and names each one it dropped. The CCI list
 is the one exception, kept because the ingest cannot run without it, and a file the manifest
-never recorded, such as a zip you placed by hand, is never touched. The flag exists for
+never recorded, such as a zip you placed by hand, is never touched. It refuses, before any
+download, when the drop would delete more than 25% of the recorded files (`MAX_DROP_FRACTION`
+in `stig_mcp/ingest/fetch.py`), because a catalog response cut short lists only part of the
+products and would otherwise delete most of the corpus. Rerun once the response is whole. The flag exists for
 building a release only from what DISA publishes now, which is how the release pipeline below
 uses it. For an operator the default is the right one: keep withdrawn products.
 
@@ -453,8 +478,8 @@ A build then does, in order:
    `finding_details` returns fix text for; APT29 has techniques; and "RHEL 9" resolves with
    `RHEL_9_STIG` as its top candidate. The sources
    must hold a fetch manifest and no file the fetch did not record. And the freshness
-   tripwire must pass: no benchmark on DISA's index may be at a newer release than the
-   knowledge base holds for the same product and major. A benchmark on the index under
+   tripwire must pass: no benchmark in DISA's catalog may be at a newer release than the
+   knowledge base holds for the same product and major. A benchmark in the catalog under
    another major, or under a name no stored benchmark came from (usually the old name of a
    renamed product), is listed in the run's Actions job summary and does not fail the build.
 6. Packaging, in `tools/kb_package.py`: the knowledge base compressed as
