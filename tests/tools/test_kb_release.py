@@ -160,6 +160,13 @@ def test_notes__any_release__lists_benchmarks_before_upstream():
     assert text.index("## Benchmarks") < text.index("## Upstream")
 
 
+def test_notes__any_release__names_the_catalog_as_what_the_tripwire_compared():
+    doc = {"built_with": "0.1.0", "upstream": {}, "sha256": {"xz": "x" * 64, "sqlite": "s" * 64}, "benchmarks": []}
+    text = kb_release.notes(doc, None, None, f"kb-{TODAY}")
+    assert "every benchmark in DISA's catalog is held" in text
+    assert "index" not in text
+
+
 def test_notes__no_previous_release__says_so_and_counts_the_benchmarks():
     doc = {
         "built_with": "0.1.0",
@@ -171,14 +178,14 @@ def test_notes__no_previous_release__says_so_and_counts_the_benchmarks():
     assert f"First release for schema {SCHEMA_VERSION}: 1 benchmark(s)." in text
 
 
-def test_tripwireSummary__names_on_the_index__lists_each_under_its_heading():
+def test_tripwireSummary__names_in_the_catalog__lists_each_under_its_heading():
     wire = {
         "stale": [],
         "other_major": ["U_Foo_V3R1_STIG.zip"],
         "unmatched": ["U_Old_V1R1_STIG.zip", "U_Older_V1R2_STIG.zip"],
     }
     text = kb_release.tripwire_summary(wire)
-    assert "### Newer major on the index, library major kept (1)\n- `U_Foo_V3R1_STIG.zip`\n" in text
+    assert "### Newer major in the catalog, library major kept (1)\n- `U_Foo_V3R1_STIG.zip`\n" in text
     assert "came from (usually an older name) (2)\n- `U_Old_V1R1_STIG.zip`\n- `U_Older_V1R2_STIG.zip`\n" in text
 
 
@@ -187,7 +194,7 @@ def test_tripwireSummary__nothing_unmatched__says_none_under_each_heading():
     assert text.count("(0)\n- none\n") == 2
 
 
-def test_build__an_unmatched_index_name__goes_to_the_step_summary_not_the_notes(kb_path, tmp_path, monkeypatch):
+def test_build__an_unmatched_catalog_name__goes_to_the_step_summary_not_the_notes(kb_path, tmp_path, monkeypatch):
     kb, sources = _build_inputs(kb_path, tmp_path, monkeypatch)
     out = tmp_path / "release"
     summary = tmp_path / "summary.md"

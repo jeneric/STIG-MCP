@@ -6,7 +6,7 @@ rejects or neutralizes it:
   - S310: the fetcher must refuse non-http(s) source URLs before any retrieval.
   - S608: a malicious stig_id must be bound as a literal, never injected into SQL.
   - no S rule: a caller-supplied digit run must not crash the resolver on int() conversion.
-  - no S rule: a remote index entry or a manifest key must not name a path, since every
+  - no S rule: a remote catalog entry or a manifest key must not name a path, since every
     caller joins it onto the sources directory to write to and to unlink.
   - no S rule: a remote version, folder name or date written in non-ASCII digits must not
     outrank a real release or pass as a date.
@@ -153,11 +153,22 @@ class _PlentyOfDisk:
 _PLENTY_OF_DISK = _PlentyOfDisk()
 
 
-def _always_serving(payload):
-    """An opener that answers every URL, so a request that escapes is served rather than
-    raising a KeyError before the write it is meant to demonstrate."""
+class _HeadAnswer(io.BytesIO):
+    def __init__(self, length):
+        super().__init__(b"")
+        self.headers = {"Content-Length": str(length)}
 
-    def open_url(_request, timeout=None):
+
+def _always_serving(catalog_body, payload):
+    """An opener that answers the catalog POST with catalog_body and every other URL with
+    payload, a HEAD with its length, so a request that escapes is served rather than raising
+    a KeyError before the write it is meant to demonstrate."""
+
+    def open_url(request, timeout=None):
+        if request.get_method() == "POST":
+            return io.BytesIO(catalog_body.encode())
+        if request.get_method() == "HEAD":
+            return _HeadAnswer(len(payload))
         return io.BytesIO(payload)
 
     return open_url
@@ -178,24 +189,65 @@ def test_require_bare_name__a_name_the_real_index_publishes__is_accepted(name):
     fetch.require_bare_name(name)  # no exception
 
 
-def test_parse_index__a_row_whose_href_leaves_the_directory__refuses_the_page():
-    text = '<A HREF="../ESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
-    with pytest.raises(ValueError, match="plain filename"):
-        catalog.parse_index(text)
+_MIRROR_ZIP_PATH = "https://s3.us-gov-west-1.amazonaws.com/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
 
 
-def test_parse_index__a_percent_encoded_traversal__is_refused_after_unquoting():
+def _catalog_body(link):
+    return json.dumps({"returnValue": [{"DownloadLink": link, "UploadDate": "2026-10-05", "FileName": "x"}]})
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        catalog.ZIP_BASE + "../escape.zip",
+        catalog.ZIP_BASE + "%2e%2e%2fescape.zip",
+        catalog.ZIP_BASE + "sub/x.zip",
+        _MIRROR_ZIP_PATH + "../escape.zip",
+        _MIRROR_ZIP_PATH + "%2e%2e%2fescape.zip",
+        _MIRROR_ZIP_PATH + "..%5cescape.zip",
+    ],
+)
+def test_parse_catalog__a_link_on_the_zip_path_that_leaves_it__refuses_the_response(link):
     # The name is unquoted before the guard sees it, so an encoded separator cannot slip past
     # the way it would past a check on the raw href.
-    text = '<A HREF="%2e%2e%2fESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
     with pytest.raises(ValueError, match="plain filename"):
-        catalog.parse_index(text)
+        catalog.parse_catalog(_catalog_body(link))
 
 
-def test_fetch_disa__an_index_row_that_leaves_the_destination__writes_nothing_outside_it(tmp_path, monkeypatch):
+def test_parse_catalog__a_zip_on_another_host_off_the_zip_path__is_ignored():
+    evil = "https://evil.example/payloads/U_Foo_V1R1_STIG.zip"
+    good = catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip"
+    body = json.dumps(
+        {
+            "returnValue": [
+                {"DownloadLink": evil, "UploadDate": "2026-10-05", "FileName": "x"},
+                {"DownloadLink": good, "UploadDate": "2026-10-05", "FileName": "y"},
+            ]
+        }
+    )
+    assert [e.name for e in catalog.parse_catalog(body)] == ["U_Bar_V1R1_STIG.zip"]
+
+
+def test_head_length__a_mirror_host_entry__never_requests_the_mirror_host():
+    entry, *_ = catalog.parse_catalog(
+        _catalog_body("https://evil.example/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip")
+    )
+    seen = []
+
+    def open_url(request, timeout=None):
+        seen.append(request.full_url)
+        response = io.BytesIO(b"")
+        response.headers = {"Content-Length": "1"}
+        return response
+
+    catalog.head_length(entry, open_url)
+    assert seen == [catalog.ZIP_BASE + "U_Foo_V1R1_STIG.zip"]
+
+
+def test_fetch_disa__a_catalog_row_that_leaves_the_destination__writes_nothing_outside_it(tmp_path, monkeypatch):
     """The ESCAPE assertion is what must fail when the guard is gone, so the raise is tolerated.
 
-    Its sibling above pins the raise itself. Here the guard is removed from catalog.parse_index
+    Its sibling above pins the raise itself. Here the guard is removed from catalog.parse_catalog
     and the last line fails on the file that appeared outside dest, rather than on a DID NOT
     RAISE that would never reach it. tmp_path itself is the escape target, so the write an
     unguarded run makes lands inside this test's own directory and nowhere else, and the
@@ -205,13 +257,33 @@ def test_fetch_disa__an_index_row_that_leaves_the_destination__writes_nothing_ou
     dest = tmp_path / "sources"
     dest.mkdir()
     escaped = tmp_path / "ESCAPED.zip"
-    text = '<A HREF="../ESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
-    opener = _always_serving(b"payload an unguarded run would write outside dest")
+    body = _catalog_body(catalog.ZIP_BASE + "../ESCAPED.zip")
+    opener = _always_serving(body, b"payload an unguarded run would write outside dest")
     with contextlib.suppress(ValueError):
         # The parse is inside the suppression because the guard is what raises; without it
-        # the whole call runs and the download lands outside dest.
-        fetch.fetch_disa(dest, opener=opener, entries=catalog.parse_index(text))
+        # the whole call runs and the download lands outside dest. The entries are handed to
+        # fetch_disa rather than read through disa_selection, whose selection takes no
+        # path-bearing name and would leave the guard untested.
+        entries = [e._replace(size_bytes=catalog.head_length(e, opener)) for e in catalog.parse_catalog(body)]
+        fetch.fetch_disa(dest, opener=opener, entries=entries, sleep=lambda _seconds: None)
     assert not escaped.exists(), f"fetch_disa wrote {escaped}, outside the destination {dest}"
+
+
+def test_fetch_disa__same_name_reissued_at_a_new_length__downloads_it_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(fetch.shutil, "disk_usage", lambda _path: _PLENTY_OF_DISK)
+    name = "U_Foo_V1R1_STIG.zip"
+    (tmp_path / name).write_bytes(b"old")
+    fetch.write_manifest(tmp_path, [catalog.Entry(name=name, href=name, date="10-Jul-2026", size_bytes=3)])
+    reissued = [catalog.Entry(name=name, href=name, date="10-Aug-2026", size_bytes=7)]
+    requested = []
+
+    def open_url(request, timeout=None):
+        requested.append(request.get_method())
+        return io.BytesIO(b"new rel")
+
+    fetch.fetch_disa(tmp_path, opener=open_url, entries=reissued, sleep=lambda _seconds: None)
+    assert (tmp_path / name).read_bytes() == b"new rel"
+    assert requested == ["GET"]
 
 
 def test_fetch_disa__a_server_that_never_stops_resetting__is_asked_a_bounded_number_of_times(tmp_path, monkeypatch):
@@ -227,7 +299,7 @@ def test_fetch_disa__a_server_that_never_stops_resetting__is_asked_a_bounded_num
         requested.append(request.full_url)
         raise urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))
 
-    entries = catalog.parse_index('<A HREF="U_Foo_V1R1_STIG.zip">x</A> 10-Jul-2026 12:00  1k\n')
+    entries = [catalog.Entry(name="U_Foo_V1R1_STIG.zip", href="U_Foo_V1R1_STIG.zip", date="2026-10-05", size_bytes=1)]
     with pytest.raises(urllib.error.URLError):
         fetch.fetch_disa(tmp_path, opener=always_resetting, entries=entries, sleep=paused.append)
     assert len(requested) == fetch.RETRY_ATTEMPTS

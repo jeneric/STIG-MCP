@@ -135,12 +135,29 @@ def test_operations__fetch_retry__matches_the_constants():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
     match = re.search(
-        r"tries each download and the index read up to (\d+) times, waiting (\d+), (\d+) and (\d+) seconds",
+        r"tries each download, HEAD request and catalog read up to (\d+) times, "
+        r"waiting (\d+), (\d+) and (\d+)\s+seconds",
         OPERATIONS.read_text(),
     )
     assert match, "the retry sentence must keep its extractable form"
     assert int(match.group(1)) == fetch.RETRY_ATTEMPTS
     assert tuple(int(match.group(n)) for n in (2, 3, 4)) == fetch.RETRY_BACKOFF
+
+
+def test_operations__drop_limit__matches_the_constant():
+    from stig_mcp.ingest import fetch  # noqa: PLC0415
+
+    match = re.search(r"more than (\d+)% of the recorded files \(`MAX_DROP_FRACTION`", OPERATIONS.read_text())
+    assert match, "the --drop-withdrawn paragraph must state the limit as 'more than N% of the recorded files'"
+    assert int(match.group(1)) == round(fetch.MAX_DROP_FRACTION * 100)
+
+
+def test_operations__catalog_class_id_remedy__names_the_constant_and_the_method():
+    from stig_mcp.ingest import catalog  # noqa: PLC0415
+
+    body = _section(OPERATIONS.read_text(), "If the catalog read fails")
+    assert "`CATALOG_CLASSNAME`" in body
+    assert catalog.CATALOG_METHOD in body
 
 
 def test_operations__retried_http_codes__match_the_transient_codes():

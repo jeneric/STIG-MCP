@@ -49,11 +49,13 @@ def _usable_public(section):
 # without demanding a partition.
 REQUIRED_FREE_BYTES = 2 * 1024**3
 
-_CCI_NAME = "U_CCI_List.zip"
+_CCI_NAME = "CCI_List.zip"
 # Kept even by --drop-withdrawn: the ingest cannot run without it, and _product_key cannot key it.
 NEVER_DROPPED = frozenset({_CCI_NAME})
-# What DISA ships inside _CCI_NAME and what the ingest reads: inventory._SOURCE_FILES and
-# orchestrator both name this file, and neither knows the archive exists.
+MAX_DROP_FRACTION = 0.25
+_CCI_ARCHIVE_MEMBER = "CCI_List.xml"
+# The on-disk name the ingest reads: inventory._SOURCE_FILES and orchestrator both name it,
+# and neither knows the archive exists.
 _CCI_MEMBER = "U_CCI_List.xml"
 _DOWNLOAD_TIMEOUT = 120
 _DIGEST_CHUNK = 1024 * 1024
@@ -89,7 +91,8 @@ def manual_sources():
     # stig-mcp-ingest reports, including when STIG_MCP_DATA is set.
     return [
         f"DISA STIG Library Compilation (quarterly zip) -> extract *xccdf.xml into {config.SOURCES_DIR}",
-        f"DISA CCI List (U_CCI_List.xml) -> place in {config.SOURCES_DIR}",
+        f"DISA CCI List (download CCI_List.zip, save its CCI_List.xml as U_CCI_List.xml) -> place in "
+        f"{config.SOURCES_DIR}",
         f"Loose product STIG zips (optional, broadens coverage) -> place in {config.SOURCES_DIR}",
     ]
 
@@ -143,16 +146,18 @@ def require_bare_name(name):
     separator, a drive letter or a `..` step therefore reaches outside the sources directory
     for both the write and the delete.
 
-    The message names the index only: catalog.parse_index is the sole caller that raises it,
-    and read_manifest applies the same rule through _is_bare_name by dropping the key instead.
+    The message names the catalog only: catalog.parse_catalog is the sole caller that raises
+    it, and read_manifest applies the same rule through _is_bare_name by dropping the key instead.
     """
     if not _is_bare_name(name):
         raise ValueError(
-            f"Refusing the index entry {name!r}: it must be a plain filename, not a path. It "
-            f"is joined onto the sources directory, so a name carrying a directory separator, "
-            f"a drive letter or a '..' step would write or delete outside it. DISA's directory "
-            f"listing publishes plain filenames, so a row of this shape means the page read "
-            f"was not that listing: check the URL fetched and read the index again."
+            f"Refusing the cyber.mil catalog entry {name!r}: it must be a plain filename, not a "
+            f"path. It is joined onto the sources directory, so a name carrying a directory "
+            f"separator, a drive letter or a '..' step would write or delete outside it. DISA's "
+            f"catalog links each zip by its plain filename, so a link of this shape means the "
+            f"response read was not that catalog: check that CATALOG_URL in "
+            f"stig_mcp/ingest/catalog.py still answers with DISA's STIG catalog, then run the "
+            f"command again."
         )
 
 
@@ -271,7 +276,7 @@ def _take_catalog(dest_dir, open_url, _opener):
 
 
 def selection(entries):
-    """Everything worth downloading from one index read: the current library compilation, the
+    """Everything worth downloading from one catalog read: the current library compilation, the
     sunset archive, the CCI list, and the newest loose STIG of each product."""
     # A module-level import here breaks `python -m stig_mcp.ingest.fetch` and the
     # stig-mcp-fetch console script outright, because they import this module first.
@@ -281,13 +286,82 @@ def selection(entries):
     archive = catalog.sunset(entries)
     if archive is not None:
         chosen.append(archive)
-    # Exact name, never a substring: the index publishes both U_CCI_List.zip and a differently
-    # sized CCI_List.zip, and only the full name separates them.
+    # Exact name, never a substring: the catalog can list near-miss names such as
+    # U_CCI_List.zip or CCI_List_v2.zip, and only the full name separates them.
     cci = next((e for e in entries if e.name == _CCI_NAME), None)
     if cci is not None:
         chosen.append(cci)
     chosen.extend(catalog.newest_per_product(entries))
     return chosen
+
+
+def _read_catalog(open_url, pause):
+    from stig_mcp.ingest import catalog  # noqa: PLC0415 (local to avoid a cycle, as in selection)
+
+    read = functools.partial(catalog.fetch_catalog, opener=open_url)
+    try:
+        return _with_retry(read, "the DISA catalog", pause)
+    except urllib.error.HTTPError as exc:
+        if is_transient(exc):
+            raise
+        raise catalog.catalog_call_error(f"was HTTP {exc.code} ({exc.reason})") from exc
+
+
+def disa_selection(opener=None, pause=None):
+    """selection over the cyber.mil catalog, with every chosen entry's size_bytes set to the
+    exact length its HEAD reports, so diff can catch a same-name reissue and preflight sums
+    real lengths. The catalog read and each HEAD retry a transient failure through pause.
+
+    One opener serves every request, so a run builds the TLS context once rather than once per
+    HEAD.
+    """
+    from stig_mcp.ingest import catalog  # noqa: PLC0415 (local to avoid a cycle, as in selection)
+
+    pause = pause or time.sleep
+    open_url = opener or tls.opener()
+    chosen = selection(catalog.parse_catalog(_read_catalog(open_url, pause)))
+    return [_sized(entry, open_url, pause) for entry in chosen]
+
+
+def _sized(entry, open_url, pause):
+    """entry with size_bytes from its HEAD, or a RuntimeError naming the file and the URL.
+
+    Wraps only after _with_retry has given up, so transient failures are still retried on the
+    raw exception is_transient classifies. OSError covers URLError, HTTPError, TimeoutError and
+    ConnectionError.
+    """
+    from stig_mcp.ingest import catalog  # noqa: PLC0415 (local to avoid a cycle, as in selection)
+
+    try:
+        length = _with_retry(functools.partial(catalog.head_length, entry, open_url), entry.name, pause)
+    except (OSError, http.client.HTTPException) as exc:
+        url = urllib.parse.urljoin(catalog.ZIP_BASE, entry.href)
+        raise RuntimeError(
+            f"HEAD {url} for {entry.name}, which the cyber.mil catalog lists, failed: {exc}. {_head_advice(exc)}"
+        ) from exc
+    return entry._replace(size_bytes=length)
+
+
+_GONE_HTTP_CODES = frozenset({404, 410})
+_ZIP_HOST = "dl.dod.cyber.mil"
+
+
+def _head_advice(exc):
+    if is_transient(exc):
+        return "The failure is transient and outlasted every retry: run the command again later."
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in _GONE_HTTP_CODES:
+        return (
+            "DISA's catalog lists a file its download host no longer serves: run the command "
+            "again once DISA corrects the catalog or restores the file, and until then the "
+            "rest of the selection cannot be checked or fetched either."
+        )
+    if isinstance(exc, urllib.error.HTTPError):
+        return (
+            f"The download host refused the request with HTTP {exc.code}: check that this "
+            f"machine can reach {_ZIP_HOST} and that DISA is not blocking it, then run the "
+            f"command again."
+        )
+    return "The request did not reach the download host: check the network path and TLS setup to it."
 
 
 def preflight(dest_dir, entries, disk_usage=None):
@@ -314,7 +388,7 @@ def preflight(dest_dir, entries, disk_usage=None):
 
 
 def write_manifest(dest_dir, entries, *, vouched_for=None):
-    """What the fetch took and what the index said about it, for --check and --refresh to diff.
+    """What the fetch took and what the catalog said about it, for --check and --refresh to diff.
 
     vouched_for names the entries whose file on disk the caller has just established: skipped
     because the recorded length still matched, or downloaded cleanly. Every OTHER entry
@@ -335,9 +409,10 @@ def write_manifest(dest_dir, entries, *, vouched_for=None):
     every digest included, is built BEFORE the write, so the far longer hashing window cannot
     leave a half-written file: only the write itself is exposed.
 
-    size_bytes and on_disk_bytes answer different questions and routinely disagree:
-    size_bytes is what the index advertised, which is a rounded human-readable column, while
-    on_disk_bytes is the length of the file actually stored. See _already_downloaded.
+    size_bytes and on_disk_bytes answer different questions: size_bytes is the exact length
+    the server's HEAD advertised before the download, while on_disk_bytes is the length of the
+    file actually stored. A manifest from 0.2.0 or earlier holds the old listing's rounded
+    size in size_bytes, which is why nothing compares against it. See _already_downloaded.
 
     The public section belongs to fetch_public and is carried over unchanged.
     """
@@ -387,9 +462,9 @@ def read_manifest(dest_dir):
     A key that is not a plain filename is dropped the same way, and this is the guard that
     stands between a manifest and prune's unlink: prune iterates these keys and joins each one
     onto dest_dir, so a key like ../victim.zip would delete outside the sources directory.
-    Validating index entries alone would not close that, because this file is JSON read off
-    disk, written by an earlier run or edited by hand, not an index the current run parsed.
-    Dropped rather than raised, unlike an index entry (catalog.parse_index): the manifest is
+    Validating catalog entries alone would not close that, because this file is JSON read off
+    disk, written by an earlier run or edited by hand, not a catalog the current run parsed.
+    Dropped rather than raised, unlike a catalog entry (catalog.parse_catalog): the manifest is
     local state any run rewrites, so dropping costs one re-fetch, while raising would leave
     every command dead until the operator deleted the file by hand.
     """
@@ -422,18 +497,25 @@ def _digest(path):
     return digest.hexdigest()
 
 
-def _already_downloaded(target, recorded):
+def _already_downloaded(target, recorded, advertised=None):
     """True when the file this manifest entry recorded is still on disk at that length.
 
-    Compares against on_disk_bytes and NEVER against the index's size_bytes. The index's size
-    column is a rounded display value that matches almost no real file's length, so comparing
-    against it would re-download the whole selection on every run.
+    Compares against on_disk_bytes and NEVER against size_bytes. size_bytes is the length the
+    server advertised, and a manifest from 0.2.0 or earlier holds the old listing's rounded
+    display value there, which matches almost no real file's length, so comparing against it
+    would re-download the whole selection.
 
     A file present at some other length is a truncated or superseded download and must be
     taken again, and so is a file recorded while it was absent (on_disk_bytes is None).
+
+    advertised is the length the server's HEAD reports now. A same-name file whose HEAD differs
+    from the stored length was reissued and is taken again. prune passes nothing: it runs
+    against the manifest fetch_disa just wrote.
     """
     stored = recorded.get("on_disk_bytes")
-    return stored is not None and target.is_file() and target.stat().st_size == stored
+    if stored is None or (advertised is not None and advertised != stored):
+        return False
+    return target.is_file() and target.stat().st_size == stored
 
 
 def _refuse_cui_url(url):
@@ -509,6 +591,8 @@ def _download(open_url, url, target, user_agent):
 def extract_cci(dest_dir):
     """Put U_CCI_List.xml beside the archive a fetch took, or nothing when there is no archive.
 
+    The archive's member is CCI_List.xml; the ingest reads it under the on-disk name U_CCI_List.xml.
+
     DISA publishes the CCI list only as a zip and the ingest reads the XML inside it
     (inventory._SOURCE_FILES, and the cci_path orchestrator builds). Without this the two
     documented commands do not compose at all: the fetch completes and the ingest then stops
@@ -528,7 +612,7 @@ def extract_cci(dest_dir):
 
     Reads exactly one member, by exact key, into a destination built from module constants
     alone. No name out of the archive reaches the path written to and extractall is never
-    called, so a member called ../U_CCI_List.xml or /etc/passwd is not dangerous but simply
+    called, so a member called ../CCI_List.xml or /etc/passwd is not dangerous but simply
     absent: it is not the key asked for, and the read raises instead.
 
     Every failure of the READ becomes a RuntimeError. _fetch_disa_or_advise catches
@@ -543,12 +627,12 @@ def extract_cci(dest_dir):
         return None
     try:
         with zipfile.ZipFile(archive_path) as archive:
-            data = archive.read(_CCI_MEMBER)
+            data = archive.read(_CCI_ARCHIVE_MEMBER)
     except (zipfile.BadZipFile, KeyError, OSError, EOFError, zlib.error) as exc:
         raise RuntimeError(
-            f"Cannot read {_CCI_MEMBER} out of {archive_path}: {exc}. Delete that archive and "
+            f"Cannot read {_CCI_ARCHIVE_MEMBER} out of {archive_path}: {exc}. Delete that archive and "
             f"run stig-mcp-fetch again to take it afresh, or download {_CCI_NAME} from "
-            f"cyber.mil and place {_CCI_MEMBER} from it in {dest_dir} by hand."
+            f"cyber.mil and place {_CCI_ARCHIVE_MEMBER} from it in {dest_dir} as {_CCI_MEMBER} by hand."
         ) from exc
     target = Path(dest_dir) / _CCI_MEMBER
     target.write_bytes(data)
@@ -558,12 +642,14 @@ def extract_cci(dest_dir):
 def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
     """Download the selected DISA artifacts into dest_dir and write the manifest.
 
-    Roughly a gigabyte from one government host, so requests are spaced by delay seconds;
-    entries already on disk at their recorded length are skipped and make no request at all.
-    Pass entries to fetch a subset, otherwise the index is read once and selection decides.
+    Roughly a gigabyte from one government host, so downloads are spaced by delay seconds; the
+    HEADs that size the selection are not. Entries already on disk at their recorded length
+    are skipped and make no request at all.
+    Pass entries to fetch a subset, otherwise disa_selection reads the catalog once and sizes
+    what selection takes.
 
     Returns every selected file now on disk, skipped and freshly fetched alike, followed by
-    the CCI XML when extract_cci produced one. That last path is NOT an index entry and never
+    the CCI XML when extract_cci produced one. That last path is NOT a catalog entry and never
     reaches the manifest; it is returned so main() prints it and the operator sees the file
     the ingest will read. The manifest is written even when a download fails, so that a retry
     re-fetches only what did not arrive. It describes exactly the entries this call was
@@ -575,8 +661,8 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
     named U_CCI_List.xml among the artifacts to place by hand; the next run that completes
     extracts it.
 
-    The index read and each download retry a transient failure through sleep, which also
-    receives the inter-download delay.
+    The catalog read, each HEAD and each download retry a transient failure through sleep,
+    which also receives the inter-download delay.
     """
     from stig_mcp.ingest import catalog  # noqa: PLC0415 (local to avoid a cycle, as in selection)
 
@@ -584,19 +670,18 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
     dest_dir.mkdir(parents=True, exist_ok=True)
     pause = sleep or time.sleep
     if entries is None:
-        read = functools.partial(catalog.fetch_listing, opener=opener)
-        entries = selection(catalog.parse_index(_with_retry(read, "the DISA index", pause)))
+        entries = disa_selection(opener=opener, pause=pause)
     recorded = read_manifest(dest_dir)["entries"]
     written = []
     pending = []
     vouched_for = set()
     for entry in entries:
-        url = urllib.parse.urljoin(catalog.INDEX_URL, entry.href)
+        url = urllib.parse.urljoin(catalog.ZIP_BASE, entry.href)
         _refuse_cui_url(url)
         require_web_url(url)
         target = dest_dir / entry.name
         written.append(target)
-        if _already_downloaded(target, recorded.get(entry.name, {})):
+        if _already_downloaded(target, recorded.get(entry.name, {}), entry.size_bytes):
             vouched_for.add(entry.name)
         else:
             pending.append((entry, url, target))
@@ -627,16 +712,19 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
 
 
 def diff(entries, manifest):
-    """What changed on the DISA index since the manifest was written, by name set alone.
+    """What changed in DISA's catalog since the manifest was written.
 
     Compares the names entries carries against the names manifest["entries"] carries, and
-    never compares dates: DISA bulk re-uploads move most of the index's dates at once, so date
-    equality proves nothing about content. DISA encodes the release in the filename, so a
-    genuine change always arrives under a new name. size_bytes is a corroborating check for a
-    name that survives; the date is only carried for a caller that wants to print it.
+    never compares dates: DISA bulk re-uploads move most dates at once, so date equality
+    proves nothing about content. DISA encodes the release in the filename, so a new release
+    arrives under a new name. For a name that survives, the HEAD length in entry.size_bytes is
+    compared with the manifest's on_disk_bytes, which catches a same-name reissue; the date is
+    only carried for a caller that wants to print it.
 
-    manifest["entries"] is read back exactly as write_manifest wrote it, so its size_bytes is
-    what the index advertised when the manifest was written, never on_disk_bytes.
+    Never the manifest's size_bytes: a manifest from 0.2.0 or earlier holds the old listing's
+    rounded size there, and comparing an exact length with it would call nearly every entry
+    resized and re-download the corpus. An on_disk_bytes of None, a file recorded while it was
+    absent, is resized, as _already_downloaded already treats it.
     """
     known = manifest.get("entries", {})
     current = {e.name: e for e in entries}
@@ -645,7 +733,7 @@ def diff(entries, manifest):
         "resized": sorted(
             name
             for name, entry in current.items()
-            if name in known and known[name].get("size_bytes") != entry.size_bytes
+            if name in known and known[name].get("on_disk_bytes") != entry.size_bytes
         ),
         "withdrawn": sorted(name for name in known if name not in current),
     }
@@ -684,15 +772,15 @@ def _supersedes(arriving, name):
     deleting it. Both names share a _prune_key, so the comparison stays inside one product and
     one version scheme.
 
-    A loose benchmark is replaced only by a LATER release. An index that regresses, DISA pulling
-    a release or one bad read of the page, must not cost the newer local copy: the rule prune
+    A loose benchmark is replaced only by a LATER release. A catalog that regresses, DISA pulling
+    a release or one bad read of the response, must not cost the newer local copy: the rule prune
     rests on is that a superseded file is strictly worse than the one replacing it, and an older
     arrival is not better at all.
 
-    A LIBRARY compilation is replaced by whichever one the index carries, older or newer. That
+    A LIBRARY compilation is replaced by whichever one the catalog carries, older or newer. That
     asymmetry is forced rather than an oversight: inventory.classify raises on two artifacts of
     kind "library", so exactly one may exist, and keeping a newer local one would mean deleting
-    the copy this very run downloaded and recorded. The index is the authority on which quarter
+    the copy this very run downloaded and recorded. The catalog is the authority on which quarter
     that is.
 
     A SUNSET archive is never replaced at all. classify tolerates two of those and ingests both
@@ -708,18 +796,64 @@ def _supersedes(arriving, name):
     return catalog.release_of(arriving)[2] > catalog.release_of(name)[2]
 
 
+def _is_superseded(name, replacement):
+    """True when replacement, the arrival sharing name's _prune_key (or None), authorizes deleting it.
+
+    prune and would_drop both ask this, so the guard counts exactly what prune would drop.
+    """
+    return replacement is not None and _supersedes(replacement, name)
+
+
 def _dispose(path, name, replacement, drop_withdrawn):
     """Which of prune's three lists `name` belongs to, unlinking the file first when it does.
 
     replacement is arrived.get(_prune_key(name)), already looked up by the caller.
     """
-    if replacement is not None and _supersedes(replacement, name):
+    if _is_superseded(name, replacement):
         path.unlink()
         return "deleted"
     if drop_withdrawn and name not in NEVER_DROPPED:
         path.unlink()
         return "dropped"
     return "retained"
+
+
+def would_drop(entries, manifest):
+    """The recorded names --drop-withdrawn would delete: absent from entries and not superseded.
+
+    A name that prune deletes as superseded by an arrival is its ordinary deletion, so it is
+    not counted. A release that went backwards or a renamed sunset archive is not superseded
+    (_supersedes), so prune drops it and this counts it.
+    """
+    current = {e.name for e in entries}
+    arrived = {_prune_key(e.name): e.name for e in entries}
+    arrived.pop(None, None)
+    return sorted(
+        name
+        for name in manifest.get("entries", {})
+        if name not in current and name not in NEVER_DROPPED and not _is_superseded(name, arrived.get(_prune_key(name)))
+    )
+
+
+def _refuse_mass_drop(entries, manifest):
+    """Raise before any DISA download when --drop-withdrawn would delete over MAX_DROP_FRACTION.
+
+    A truncated catalog response lists a fraction of the products, and dropping what it omits
+    would delete most of the corpus. No manifest, or an empty one, is a first fetch: nothing
+    is recorded, so nothing can be dropped.
+    """
+    recorded = len(manifest.get("entries", {}))
+    dropping = would_drop(entries, manifest)
+    if len(dropping) <= MAX_DROP_FRACTION * recorded:
+        return
+    listed = len(set(manifest["entries"]) & {e.name for e in entries})
+    raise RuntimeError(
+        f"The DISA catalog lists {listed} of the {recorded} files the last fetch recorded, "
+        f"so --drop-withdrawn would delete {len(dropping)} ({len(dropping) / recorded:.1%}), "
+        f"over the {MAX_DROP_FRACTION:.0%} limit. The catalog response may be cut short: rerun "
+        "once it is whole, or run stig-mcp-fetch --refresh without --drop-withdrawn to refresh "
+        "while keeping every file."
+    )
 
 
 def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
@@ -730,7 +864,7 @@ def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
     re-fetched once deleted, and the server already labels what it yields (_provenance_notes
     tells a caller the answer came from a local artifact that is not in the current library
     compilation). So a file is deleted only when a replacement for it arrived and _supersedes
-    it, never merely because the index stopped carrying its name. Loose releases and
+    it, never merely because the catalog stopped carrying its name. Loose releases and
     compilations answer that question differently, and _supersedes says why.
 
     Only names the manifest carries are ever considered, which is the whole bound on what this
@@ -741,19 +875,20 @@ def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
     sharing a key would leave only the last of them able to supersede anything.
 
     manifest is the one read BEFORE the fetch, which is the only record of what a previous run
-    put on disk; entries is what the index carries now. Call this only after a fetch that
+    put on disk; entries is what the catalog carries now. Call this only after a fetch that
     completed, because deciding what is superseded from a half-completed one is how a good file
     gets deleted for a replacement that never arrived.
 
     An arrival authorizes a deletion only if it is on disk at the length the manifest in
     dest_dir records for it, which is the manifest fetch_disa has just written by then. Never
-    the index's size_bytes: that column is a rounded display value that matches almost nothing
-    (_already_downloaded), so verifying against it would verify nothing and never prune the
-    library compilation, and inventory.classify refuses two of those at once. The check is
+    size_bytes: that is what the server advertised before the download, not what arrived, and
+    a manifest from 0.2.0 or earlier holds a rounded value there that matches almost nothing
+    (_already_downloaded), which would never prune the library compilation, and
+    inventory.classify refuses two of those at once. The check is
     independent of the caller's ordering rather than a guard against anything _run_refresh can
     produce: after a fetch_disa that returned, every entry verifies.
 
-    drop_withdrawn additionally deletes what the index no longer carries at all, unless the
+    drop_withdrawn additionally deletes what the catalog no longer carries at all, unless the
     name is in NEVER_DROPPED, for a CI build that must ship only what DISA currently publishes.
     """
     dest_dir = Path(dest_dir)
@@ -779,7 +914,7 @@ def main():
     action.add_argument(
         "--check",
         action="store_true",
-        help="report what DISA's index, ATT&CK, the CTID mapping and the NIST catalog have that the "
+        help="report what DISA's catalog, ATT&CK, the CTID mapping and the NIST catalog have that the "
         "last fetch does not, download nothing; exits 10 if updates are available, 3 if nothing is "
         "to take but a source printed as unknown could not be checked, else 0",
     )
@@ -793,8 +928,9 @@ def main():
     parser.add_argument(
         "--drop-withdrawn",
         action="store_true",
-        help="with --refresh, also delete recorded DISA files the index no longer carries (kept by "
-        "default); for building a release from current publications only",
+        help="with --refresh, also delete recorded DISA files the catalog no longer carries (kept by "
+        "default), refused when that would drop over 25%% of the recorded files; for building a "
+        "release from current publications only",
     )
     args = parser.parse_args()
     if args.drop_withdrawn and not args.refresh:
@@ -837,7 +973,7 @@ def _product_key(name):
     Mirrors catalog.newest_per_product's own key rather than matching on product text alone: a
     V/R release and a Y/M release of the same product are not comparable (see
     catalog.release_of's docstring), so a product publishing under both at once (real products
-    on the live index do) must never have a V/R withdrawal read as superseded by an unrelated
+    in the live catalog do) must never have a V/R withdrawal read as superseded by an unrelated
     Y/M release just because their names share a prefix.
 
     Reads the scheme off catalog.release_of rather than off the match groups here, so the key
@@ -855,7 +991,7 @@ def _product_key(name):
 def _withdrawn_line(name, new_names):
     """The text to print for one withdrawn name: qualified with what replaced it when the
     withdrawal is really just a version bump (the common case a quarterly check hits), bare
-    when DISA genuinely dropped the name from the index.
+    when DISA genuinely dropped the name from the catalog.
 
     Display only. The "withdrawn" list names every entry selection does not keep, whatever
     this prints; nothing downstream reads it, and prune deletes on supersession rather than
@@ -903,10 +1039,10 @@ def _run_check(dest_dir, opener=None):
     the sources have changed. Only a new or resized entry, something the next fetch would
     actually transfer, exits 10.
 
-    opener mirrors fetch_disa's own injection point, so a test reads the index from a fake
-    opener the same way every other test in this module reaches the DISA index: without
+    opener mirrors fetch_disa's own injection point, so a test reads the catalog from a fake
+    opener the same way every other test in this module reaches DISA: without
     patching urllib.request.urlopen or anything else global. main() calls this with no
-    opener, so a real run reads the live index.
+    opener, so a real run reads the live catalog.
 
     ATT&CK, CTID and the catalog are checked too. A source that cannot be reached, DISA
     included, prints unknown with the whole reason and is named in the closing line. It does
@@ -963,18 +1099,18 @@ def _refresh_public(dest_dir, report, opener):
 
 
 def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
-    """Take what the index has that the last fetch does not, then delete what it supersedes.
+    """Take what the catalog has that the last fetch does not, then delete what it supersedes.
 
     ATT&CK, CTID and the catalog are refreshed first when newer upstream. A source whose CHECK
     fails is named and skipped; a source whose DOWNLOAD fails stops the whole refresh before
     anything is pruned, leaving the previous file in place.
 
     The manifest is read BEFORE the fetch, because fetch_disa replaces it with one describing
-    only what the index carries now, and prune needs the older record to know what a previous
+    only what the catalog carries now, and prune needs the older record to know what a previous
     run left on disk.
 
     No manifest is written after prune. fetch_disa builds the manifest from the entries it was
-    given, so a name prune deletes is one the index no longer carries and is already absent
+    given, so a name prune deletes is one the catalog no longer carries and is already absent
     from it; and on a fetch_disa that returned, every entry is on disk and vouched for, so a
     second write would re-hash roughly a gigabyte to produce the same file. write_manifest is
     meant to be called once at the end of a run, and this is that call, made by fetch_disa. A
@@ -982,16 +1118,17 @@ def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
     the subset alone.
 
     opener mirrors _run_check's own injection point, so a test drives the whole command
-    without patching anything global. main() calls this with no opener. The index read retries
-    a transient failure through time.sleep, as fetch_disa's own index read does through sleep.
+    without patching anything global. main() calls this with no opener. disa_selection retries
+    a transient failure through time.sleep, as fetch_disa's own catalog read does through sleep.
     """
-    from stig_mcp.ingest import catalog, currency  # noqa: PLC0415 (both import fetch, so a cycle at module level)
+    from stig_mcp.ingest import currency  # noqa: PLC0415 (currency imports fetch, so a cycle at module level)
 
     taken = _refresh_public(dest_dir, currency.public_report(dest_dir, opener=opener), opener)
-    read = functools.partial(catalog.fetch_listing, opener=opener)
-    entries = selection(catalog.parse_index(_with_retry(read, "the DISA index", time.sleep)))
+    entries = disa_selection(opener=opener, pause=time.sleep)
     manifest = read_manifest(dest_dir)
     changes = diff(entries, manifest)
+    if drop_withdrawn:
+        _refuse_mass_drop(entries, manifest)
     # Nothing is pruned when this raises: a half-completed fetch cannot say what is superseded.
     _fetch_disa_or_advise(dest_dir, opener=opener, delay=delay, entries=entries)
     result = prune(dest_dir, entries, manifest, drop_withdrawn=drop_withdrawn)
@@ -1006,7 +1143,7 @@ def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
     if changes["new"] or changes["resized"] or result["deleted"] or result["dropped"] or taken:
         print("Sources changed. Now run stig-mcp-ingest.")
     else:
-        # The commonest run of all, on an index that has not moved since the last one. Sending
+        # The commonest run of all, on a catalog that has not moved since the last one. Sending
         # the operator to rebuild the knowledge base for that would cost an hour for nothing,
         # and a retained withdrawal is not a change to the files the ingest reads.
         print("Sources were already current; nothing to rebuild.")

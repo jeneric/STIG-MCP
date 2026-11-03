@@ -1,38 +1,19 @@
-import io
 import json
 import urllib.error
 
-from stig_mcp.ingest import catalog, currency, fetch, upstream
-from tests.ingest.test_fetch import _public_bodies
-
-
-class _Opener:
-    def __init__(self, bodies):
-        self.bodies = bodies
-
-    def __call__(self, request, timeout=None):
-        body = self.bodies[request.full_url]
-        if isinstance(body, Exception):
-            raise body
-        return io.BytesIO(body)
-
-
-_LIB = '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
+from stig_mcp.ingest import currency, fetch, upstream
+from tests.ingest.test_fetch import _CATALOG_POST, _disa_bodies, _fetched, _Opener, _public_bodies, _selected
 
 
 def _served(**overrides):
-    bodies = {**_public_bodies(), catalog.INDEX_URL: _LIB.encode()}
+    bodies = {**_public_bodies(), **_disa_bodies()}
     bodies.update(overrides)
     return _Opener(bodies)
 
 
 def _fetched_everything(tmp_path):
-    opener = _served()
-    fetch.fetch_public(tmp_path, opener=opener)
-    entries = fetch.selection(catalog.parse_index(_LIB))
-    for entry in entries:
-        (tmp_path / entry.name).write_bytes(entry.name.encode())
-    fetch.write_manifest(tmp_path, entries)
+    fetch.fetch_public(tmp_path, opener=_served())
+    _fetched(tmp_path, *_selected())
 
 
 def _manifest_without_public_records(tmp_path):
@@ -56,6 +37,15 @@ def test_currency_report__everything_current__every_action_is_none(tmp_path):
         "disa": "none",
     }
     assert "built" not in report["attack"]
+
+
+def test_currency_report__disa__reads_the_catalog_and_heads(tmp_path):
+    _fetched_everything(tmp_path)
+    opener = _Opener({**_public_bodies(), **_disa_bodies("U_Foo_V1R1_STIG.zip")})
+    report = currency.currency_report(tmp_path, opener=opener)
+    assert report["disa"]["action"] == "refresh"
+    assert report["disa"]["new"] == ["U_Foo_V1R1_STIG.zip"]
+    assert _CATALOG_POST in opener.requested
 
 
 def test_currency_report__manifest_without_public_section__asks_for_a_refresh_not_a_crash(tmp_path):

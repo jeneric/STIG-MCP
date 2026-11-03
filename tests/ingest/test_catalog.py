@@ -1,4 +1,6 @@
+import json
 import re
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -7,39 +9,250 @@ from stig_mcp import tls
 from stig_mcp.ingest import catalog
 
 FIX = Path(__file__).parent.parent / "fixtures"
-INDEX = (FIX / "disa_index.html").read_text()
+# Hand-checked against the fixture: the plain STIG of each product, with every SCAP, Ansible and
+# Chef variant, CCI_List.zip and both compilations left out.
+EXPECTED_SELECTION = {
+    "U_Anduril_NixOS_V1R3_STIG.zip",
+    "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip",
+    "U_Apache_Server_2-4_Unix_Y26M07_STIG.zip",
+    "U_Cisco_IOS_Router_Y26M10_STIG.zip",
+    "U_Google_Android_14_BYOAD_Y25M10_STIG.zip",
+    "U_IBM_HMC_V2R2_STIG.zip",
+    "U_MS_IIS_10-0_Y26M10_STIG.zip",
+    "U_MS_Windows_Server_2019_V3R9_STIG.zip",
+    "U_Omnissa_Horizon_Y26M09_STIG.zip",
+    "U_RHEL_10_V1R3_STIG.zip",
+    "U_RHEL_7_V3R15_STIG.zip",
+    "U_RHEL_9_V2R10_STIG.zip",
+    "U_Splunk_Enterprise_8-x_for Linux_V2R3_STIG.zip",
+}
+CATALOG = (FIX / "cyber_mil_catalog.json").read_text(encoding="utf-8")
 
 
-def test_parse_index__the_real_index__reads_name_href_date_and_size():
-    entries = catalog.parse_index(INDEX)
-    assert len(entries) > 1000
-    by_name = {e.name: e for e in entries}
-    # Derived from the fetched fixture itself, not guessed ahead of time:
-    # the newest DISA library compilation row as of the fixture's fetch date.
-    entry = by_name["U_SRG-STIG_Library_July_2026.zip"]
-    assert entry.date == "13-Jul-2026"
-    assert entry.size_bytes > 300_000_000
+def _row(link, date="2026-10-05", title="A title"):
+    return {"DownloadLink": link, "UploadDate": date, "FileName": title, "DocumentLibrary": "STIGs"}
 
 
-def test_parse_index__a_percent_encoded_row_in_the_real_index__decodes_name_but_not_href():
-    # A real row from the fetched fixture whose href carries %20. name and href must differ,
-    # or a mutation that stops decoding (or swaps the two fields) would pass unnoticed.
-    entries = catalog.parse_index(INDEX)
-    by_href = {e.href: e for e in entries}
-    entry = by_href["U_July%202024%20Quarterly%20Release%20Automated%20Benchmarks.zip"]
-    assert entry.name == "U_July 2024 Quarterly Release Automated Benchmarks.zip"
-    assert entry.href == "U_July%202024%20Quarterly%20Release%20Automated%20Benchmarks.zip"
+def _body(*rows):
+    return json.dumps({"returnValue": list(rows)})
 
 
-def test_parse_index__a_size_in_k_and_in_m__both_become_bytes():
-    text = '<A HREF="a.zip">a.zip</A> 10-Jul-2026 12:00  665k\n<A HREF="b.zip">b.zip</A> 10-Jul-2026 12:00  1.1M\n'
-    sizes = {e.name: e.size_bytes for e in catalog.parse_index(text)}
-    assert sizes["a.zip"] == pytest.approx(665 * 1024, rel=0.01)
-    assert sizes["b.zip"] == pytest.approx(1.1 * 1024 * 1024, rel=0.01)
+def test_parse_catalog__the_saved_response__keeps_every_zip_row_on_the_zip_path():
+    entries = catalog.parse_catalog(CATALOG)
+    names = {e.name for e in entries}
+    assert all("/" not in e.href for e in entries)
+    assert all(e.size_bytes is None for e in entries)
+    assert {"CCI_List.zip", "U_SRG-STIG_Library_October_2026.zip", "U_Rev_4_SRG-STIG_Sunset_Compilation.zip"} <= names
+    assert "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip" in names  # the S3 mirror host
+    assert "U_Omnissa_Horizon_Y26M09_STIG.zip" in names  # a doubled slash after the host
+    assert "u_draft_cci_specification_v2r0.2.zip" in names  # dl.cyber.mil, on the same zip path
+    assert not any(name.lower().endswith((".pdf", ".txt")) for name in names)
+    assert len(entries) == 27
 
 
-def test_parse_index__a_page_with_no_rows__returns_empty_rather_than_raising():
-    assert catalog.parse_index("<html><body>nothing here</body></html>") == []
+def test_parse_catalog__the_saved_response__is_sorted_by_name():
+    names = [e.name for e in catalog.parse_catalog(CATALOG)]
+    assert names == sorted(names)
+
+
+def test_parse_catalog__the_saved_response__carries_upload_date():
+    by_name = {e.name: e for e in catalog.parse_catalog(CATALOG)}
+    assert by_name["U_RHEL_9_V2R10_STIG.zip"].date == "2026-10-05"
+    assert by_name["U_RHEL_9_V2R10_STIG_Ansible.zip"].date == "2026-10-06"
+
+
+def test_parse_catalog__a_link_with_a_space__quotes_the_href_and_keeps_the_name():
+    by_name = {e.name: e for e in catalog.parse_catalog(CATALOG)}
+    entry = by_name["U_Splunk_Enterprise_8-x_for Linux_V2R3_STIG.zip"]
+    assert entry.href == "U_Splunk_Enterprise_8-x_for%20Linux_V2R3_STIG.zip"
+
+
+def test_parse_catalog__the_saved_response__every_href_is_the_quoted_name():
+    entries = catalog.parse_catalog(CATALOG)
+    assert [e.href for e in entries] == [urllib.parse.quote(e.name) for e in entries]
+
+
+def test_parse_catalog__a_percent_encoded_link__decodes_name_but_not_href():
+    link = catalog.ZIP_BASE + "U_July%202024%20Quarterly%20Release.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert entry.name == "U_July 2024 Quarterly Release.zip"
+    assert entry.href == "U_July%202024%20Quarterly%20Release.zip"
+
+
+def test_parse_catalog__an_upper_case_zip_extension__is_kept():
+    (entry,) = catalog.parse_catalog(_body(_row(catalog.ZIP_BASE + "U_Foo_V1R1_STIG.ZIP")))
+    assert entry.name == "U_Foo_V1R1_STIG.ZIP"
+
+
+def test_parse_catalog__the_same_name_listed_twice__keeps_the_newest_upload_date():
+    link = catalog.ZIP_BASE + "U_Foo_V1R1_STIG.zip"
+    older, newer = _row(link, "2026-07-10"), _row(link, "2026-10-05")
+    for rows in ((older, newer), (newer, older)):
+        (entry,) = catalog.parse_catalog(_body(*rows))
+        assert entry.date == "2026-10-05"
+
+
+@pytest.mark.parametrize("body", ["{}", '{"returnValue": {}}', "<html>"])
+def test_parse_catalog__body_without_return_value__names_the_classname(body):
+    with pytest.raises(RuntimeError, match=re.escape(catalog.CATALOG_CLASSNAME)):
+        catalog.parse_catalog(body)
+
+
+def test_parse_catalog__a_doubled_slash_in_the_path__is_kept_under_zip_base():
+    link = "https://dl.dod.cyber.mil//wp-content/uploads//stigs/zip/U_Foo_V1R1_STIG.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert (entry.name, entry.href) == ("U_Foo_V1R1_STIG.zip", "U_Foo_V1R1_STIG.zip")
+
+
+def test_parse_catalog__a_mirror_host_on_the_zip_path__keeps_the_name_only():
+    link = "https://s3.us-gov-west-1.amazonaws.com/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_Foo V1R1_STIG.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert (entry.name, entry.href) == ("U_Foo V1R1_STIG.zip", "U_Foo%20V1R1_STIG.zip")
+
+
+def test_parse_catalog__a_zip_off_the_zip_path__is_skipped_and_named_in_one_warning(caplog):
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    elsewhere = _row("https://files.example/downloads/U_Foo_V1R1_STIG.zip")
+    other = _row("https://dl.dod.cyber.mil/wp-content/uploads/stigs/pdf/U_Baz_V1R1_STIG.ZIP")
+    pdf = _row("https://dl.dod.cyber.mil/wp-content/uploads/stigs/pdf/U_Qux.pdf")
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        entries = catalog.parse_catalog(_body(good, elsewhere, other, pdf))
+    assert [e.name for e in entries] == ["U_Bar_V1R1_STIG.zip"]
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert elsewhere["DownloadLink"] in record.getMessage()
+    assert other["DownloadLink"] in record.getMessage()
+    assert "U_Qux.pdf" not in record.getMessage()
+
+
+def test_parse_catalog__the_zip_path_only_in_the_query__is_skipped_and_named(caplog):
+    link = "https://files.example/a.zip?u=/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip"
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        entries = catalog.parse_catalog(_body(_row(link), good))
+    assert [e.name for e in entries] == ["U_Bar_V1R1_STIG.zip"]
+    (record,) = caplog.records
+    assert link in record.getMessage()
+
+
+def test_parse_catalog__a_mirror_link_with_a_query__keeps_it_in_the_name_and_escapes_it():
+    link = "https://s3.example/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip?x=1#y.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert entry.name == "U_Foo_V1R1_STIG.zip?x=1#y.zip"
+    assert entry.href == "U_Foo_V1R1_STIG.zip%3Fx%3D1%23y.zip"
+
+
+def test_parse_catalog__every_zip_on_the_zip_path__warns_nothing(caplog):
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        catalog.parse_catalog(_body(_row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")))
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize("link", [None, 42, ["x.zip"]])
+def test_parse_catalog__a_download_link_that_is_not_a_string__skips_the_row(link):
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    assert [e.name for e in catalog.parse_catalog(_body(_row(link), good))] == ["U_Bar_V1R1_STIG.zip"]
+
+
+@pytest.mark.parametrize("date", [None, 20261005])
+def test_parse_catalog__an_upload_date_that_is_not_a_string__becomes_empty(date):
+    (entry,) = catalog.parse_catalog(_body(_row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip", date=date)))
+    assert entry.date == ""
+
+
+def test_parse_catalog__no_zip_rows__blames_the_row_shape_not_the_classname():
+    pdf = _row("https://dl.dod.cyber.mil/wp-content/uploads/stigs/pdf/U_Foo.pdf")
+    with pytest.raises(RuntimeError, match="no zip") as raised:
+        catalog.parse_catalog(_body(pdf))
+    assert catalog.CATALOG_CLASSNAME not in str(raised.value)
+    assert "DownloadLink" in str(raised.value)
+
+
+def test_fetch_catalog__sends_the_pinned_post():
+    requests = []
+
+    class _Response:
+        def read(self):
+            return b'{"returnValue": []}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def opener(request, timeout=None):
+        requests.append(request)
+        return _Response()
+
+    assert catalog.fetch_catalog(opener=opener) == '{"returnValue": []}'
+    (request,) = requests
+    assert request.get_method() == "POST"
+    assert request.full_url == catalog.CATALOG_URL
+    assert json.loads(request.data) == {
+        "namespace": "",
+        "classname": catalog.CATALOG_CLASSNAME,
+        "method": catalog.CATALOG_METHOD,
+        "isContinuation": False,
+        "params": {"documentLibrary": catalog.CATALOG_LIBRARY},
+        "cacheable": False,
+    }
+    assert request.get_header("User-agent") == "stig-mcp"
+    assert request.get_header("Content-type") == "application/json"
+
+
+class _HeadResponse:
+    def __init__(self, headers):
+        self.headers = headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _head_opener(headers, seen):
+    def opener(request, timeout=None):
+        seen.append(request)
+        return _HeadResponse(headers)
+
+    return opener
+
+
+def _entry(name="U_RHEL_9_V2R10_STIG.zip"):
+    return catalog.Entry(name=name, href=name, date="2026-10-05", size_bytes=None)
+
+
+def test_head_length__content_length_present__returns_it():
+    seen = []
+    length = catalog.head_length(_entry(), _head_opener({"Content-Length": "2282653"}, seen))
+    assert length == 2282653
+    (request,) = seen
+    assert request.get_method() == "HEAD"
+    assert request.full_url == catalog.ZIP_BASE + "U_RHEL_9_V2R10_STIG.zip"
+    assert request.get_header("User-agent") == "stig-mcp"
+
+
+def test_head_length__an_entry_from_the_mirror_host__requests_zip_base():
+    seen = []
+    by_name = {e.name: e for e in catalog.parse_catalog(CATALOG)}
+    catalog.head_length(by_name["U_Apple_iOS-iPadOS_17_V2R2_STIG.zip"], _head_opener({"Content-Length": "1"}, seen))
+    assert seen[0].full_url == catalog.ZIP_BASE + "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip"
+
+
+def test_head_length__a_name_with_a_space__requests_the_quoted_url():
+    seen = []
+    by_name = {e.name: e for e in catalog.parse_catalog(CATALOG)}
+    entry = by_name["U_Splunk_Enterprise_8-x_for Linux_V2R3_STIG.zip"]
+    catalog.head_length(entry, _head_opener({"Content-Length": "1"}, seen))
+    assert seen[0].full_url.endswith("for%20Linux_V2R3_STIG.zip")
+
+
+@pytest.mark.parametrize("headers", [{}, {"Content-Length": "abc"}])
+def test_head_length__content_length_missing__names_the_file(headers):
+    with pytest.raises(RuntimeError, match="U_RHEL_9_V2R10_STIG.zip"):
+        catalog.head_length(_entry(), _head_opener(headers, []))
 
 
 def test_fetch_listing__a_non_web_scheme__is_refused():
@@ -47,9 +260,9 @@ def test_fetch_listing__a_non_web_scheme__is_refused():
         catalog.fetch_listing("file:///etc/passwd")
 
 
-def test_tier_of__the_real_index__classifies_the_known_tiers():
-    tiers = {e.name: catalog.tier_of(e.name) for e in catalog.parse_index(INDEX)}
-    assert tiers["U_SRG-STIG_Library_July_2026.zip"] == catalog.COMPILATION
+def test_tier_of__the_saved_response__classifies_the_known_tiers():
+    tiers = {e.name: catalog.tier_of(e.name) for e in catalog.parse_catalog(CATALOG)}
+    assert tiers["U_SRG-STIG_Library_October_2026.zip"] == catalog.COMPILATION
     assert tiers["U_Rev_4_SRG-STIG_Sunset_Compilation.zip"] == catalog.COMPILATION
     assert tiers["U_MS_Windows_Server_2019_V3R9_STIG.zip"] == catalog.BENCHMARK
     assert tiers["U_MS_Windows_Server_2019_V3R9_STIG_SCAP_1-3_Benchmark.zip"] == catalog.ADVERSARIAL
@@ -71,7 +284,7 @@ def test_tier_of__the_stig_viewer_desktop_app__is_junk_not_a_stig():
 
 
 def _named(*names):
-    return [catalog.Entry(name=n, href=n, date="10-Jul-2026", size_bytes=1) for n in names]
+    return [catalog.Entry(name=n, href=n, date="2026-07-10", size_bytes=None) for n in names]
 
 
 def test_newest_library__month_names__are_not_sorted_lexically():
@@ -142,13 +355,8 @@ def test_newest_library__only_a_sunset_archive__raises_as_though_it_were_absent(
         catalog.newest_library(_named("U_Rev_4_SRG-STIG_Sunset_Compilation.zip"))
 
 
-def test_newest_library__the_real_index__picks_july_2026():
-    # The lexical maximum of the real index's nine library names is
-    # "U_SRG-STIG_Library_October_2025.zip" ("October" sorts above "July"), so a regression
-    # to max(names) or to sorting these strings fails this test on real data. It does not
-    # pin a date-column sort too: July 2026 is the only entry whose index date differs from
-    # 28-Apr-2026, so sorting by that date would pick the same winner here by accident.
-    assert catalog.newest_library(catalog.parse_index(INDEX)).name == "U_SRG-STIG_Library_July_2026.zip"
+def test_newest_library__the_saved_response__picks_october_2026():
+    assert catalog.newest_library(catalog.parse_catalog(CATALOG)).name == "U_SRG-STIG_Library_October_2026.zip"
 
 
 def test_newest_library__no_compilation_entries__raises_rather_than_returning_none():
@@ -166,8 +374,8 @@ def test_newest_library__the_winner_has_no_readable_release__raises_rather_than_
         catalog.newest_library(_named("U_SRG-STIG_Library_Spring_Edition.zip"))
 
 
-def test_sunset__the_real_index__is_the_rev_4_archive():
-    assert catalog.sunset(catalog.parse_index(INDEX)).name == "U_Rev_4_SRG-STIG_Sunset_Compilation.zip"
+def test_sunset__the_saved_response__is_the_rev_4_archive():
+    assert catalog.sunset(catalog.parse_catalog(CATALOG)).name == "U_Rev_4_SRG-STIG_Sunset_Compilation.zip"
 
 
 def test_newest_per_product__several_releases_of_one_product__keeps_only_the_newest():
@@ -216,20 +424,9 @@ def test_newest_per_product__filenames_with_no_parseable_version__are_all_kept()
     assert kept == {e.name for e in entries}
 
 
-def test_newest_per_product__the_real_index__keeps_every_unversioned_name():
-    selected = {e.name for e in catalog.newest_per_product(catalog.parse_index(INDEX))}
-    assert "U_Ivanti_MI_Sentry_9-x_STIG.zip" in selected
-    # The exact count for tests/fixtures/disa_index.html, not a range: a range wide enough to
-    # pass both 275 (STIG Viewer included) and 266 (viewer excluded, one scheme per product)
-    # cannot tell whether the viewer archives are selected.
-    assert len(selected) == 269
-
-
-def test_newest_per_product__the_stig_viewer_desktop_app__is_not_selected():
-    # Without this assertion, a revert of the tier_of
-    # viewer exclusion goes unnoticed by this module's own tests.
-    selected = {e.name for e in catalog.newest_per_product(catalog.parse_index(INDEX))}
-    assert not any(name.startswith("U_STIGViewer-") for name in selected)
+def test_newest_per_product__the_saved_response__keeps_the_newest_of_each_product_and_scheme():
+    selected = {e.name for e in catalog.newest_per_product(catalog.parse_catalog(CATALOG))}
+    assert selected == EXPECTED_SELECTION
 
 
 def test_newest_per_product__scap_and_ansible_variants__are_excluded():
@@ -287,14 +484,6 @@ def test_release_of__both_version_schemes_and_a_nameless_one__reports_scheme_pos
     assert catalog.release_of("U_Foo_V1R1_STIG.zip.bak") == (None, None, None)
 
 
-def test_bytes_of__a_size_carrying_no_unit_suffix__is_read_as_plain_bytes():
-    # Every size on the real DISA index carries a K, M or G suffix, so this branch is
-    # unreachable from tests/fixtures/disa_index.html.
-    assert catalog._bytes_of("1024") == 1024
-    assert catalog._bytes_of("1.5K") == 1536
-    assert catalog._bytes_of("2M") == 2 * 1024**2
-
-
 class _Reached(Exception):
     """Raised by the patched tls opener, so reaching it is observable."""
 
@@ -306,7 +495,7 @@ def _refusing_opener(*_handlers):
     return open_url
 
 
-def test_fetch_listing__no_opener_given__opens_through_the_truststore_opener(monkeypatch):
+def test_fetch_catalog__no_opener_given__opens_through_the_truststore_opener(monkeypatch):
     monkeypatch.setattr(tls, "opener", _refusing_opener)
-    with pytest.raises(_Reached, match=re.escape(catalog.INDEX_URL)):
-        catalog.fetch_listing()
+    with pytest.raises(_Reached, match=re.escape(catalog.CATALOG_URL)):
+        catalog.fetch_catalog()

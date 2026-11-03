@@ -108,7 +108,7 @@ quick start.
 - `stig-mcp-install-kb` contacts the same hosts, and nothing at all with `--file`.
 - `stig-mcp-fetch`, used only to build the knowledge base yourself, downloads from
   `raw.githubusercontent.com` and `api.github.com` (MITRE ATT&CK, the CTID mapping, the NIST
-  800-53 catalog) and from `dl.dod.cyber.mil` (DISA).
+  800-53 catalog) and from `www.cyber.mil` and `dl.dod.cyber.mil` (DISA).
 
 [PRIVACY.md](https://github.com/jeneric/STIG-MCP/blob/main/PRIVACY.md) states what each of these requests sends and what is stored locally.
 
