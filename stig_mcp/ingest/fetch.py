@@ -52,6 +52,7 @@ REQUIRED_FREE_BYTES = 2 * 1024**3
 _CCI_NAME = "CCI_List.zip"
 # Kept even by --drop-withdrawn: the ingest cannot run without it, and _product_key cannot key it.
 NEVER_DROPPED = frozenset({_CCI_NAME})
+MAX_DROP_FRACTION = 0.25
 _CCI_ARCHIVE_MEMBER = "CCI_List.xml"
 # The on-disk name the ingest reads: inventory._SOURCE_FILES and orchestrator both name it,
 # and neither knows the archive exists.
@@ -760,18 +761,64 @@ def _supersedes(arriving, name):
     return catalog.release_of(arriving)[2] > catalog.release_of(name)[2]
 
 
+def _is_superseded(name, replacement):
+    """True when replacement, the arrival sharing name's _prune_key (or None), authorizes deleting it.
+
+    prune and would_drop both ask this, so the guard counts exactly what prune would drop.
+    """
+    return replacement is not None and _supersedes(replacement, name)
+
+
 def _dispose(path, name, replacement, drop_withdrawn):
     """Which of prune's three lists `name` belongs to, unlinking the file first when it does.
 
     replacement is arrived.get(_prune_key(name)), already looked up by the caller.
     """
-    if replacement is not None and _supersedes(replacement, name):
+    if _is_superseded(name, replacement):
         path.unlink()
         return "deleted"
     if drop_withdrawn and name not in NEVER_DROPPED:
         path.unlink()
         return "dropped"
     return "retained"
+
+
+def would_drop(entries, manifest):
+    """The recorded names --drop-withdrawn would delete: absent from entries and not superseded.
+
+    A name that prune deletes as superseded by an arrival is its ordinary deletion, so it is
+    not counted. A release that went backwards or a renamed sunset archive is not superseded
+    (_supersedes), so prune drops it and this counts it.
+    """
+    current = {e.name for e in entries}
+    arrived = {_prune_key(e.name): e.name for e in entries}
+    arrived.pop(None, None)
+    return sorted(
+        name
+        for name in manifest.get("entries", {})
+        if name not in current and name not in NEVER_DROPPED and not _is_superseded(name, arrived.get(_prune_key(name)))
+    )
+
+
+def _refuse_mass_drop(entries, manifest):
+    """Raise before any download when --drop-withdrawn would delete over MAX_DROP_FRACTION.
+
+    A truncated catalog response lists a fraction of the products, and dropping what it omits
+    would delete most of the corpus. No manifest, or an empty one, is a first fetch: nothing
+    is recorded, so nothing can be dropped.
+    """
+    recorded = len(manifest.get("entries", {}))
+    dropping = would_drop(entries, manifest)
+    if len(dropping) <= MAX_DROP_FRACTION * recorded:
+        return
+    listed = len(set(manifest["entries"]) & {e.name for e in entries})
+    raise RuntimeError(
+        f"The DISA catalog lists {listed} of the {recorded} files the last fetch recorded, "
+        f"so --drop-withdrawn would delete {len(dropping)} ({len(dropping) / recorded:.0%}), "
+        f"over the {MAX_DROP_FRACTION:.0%} limit. The catalog response may be cut short: rerun "
+        "once it is whole, or run stig-mcp-fetch --refresh without --drop-withdrawn to refresh "
+        "while keeping every file."
+    )
 
 
 def prune(dest_dir, entries, manifest, *, drop_withdrawn=False):
@@ -1044,6 +1091,8 @@ def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
     entries = disa_selection(opener=opener, pause=time.sleep)
     manifest = read_manifest(dest_dir)
     changes = diff(entries, manifest)
+    if drop_withdrawn:
+        _refuse_mass_drop(entries, manifest)
     # Nothing is pruned when this raises: a half-completed fetch cannot say what is superseded.
     _fetch_disa_or_advise(dest_dir, opener=opener, delay=delay, entries=entries)
     result = prune(dest_dir, entries, manifest, drop_withdrawn=drop_withdrawn)

@@ -1617,15 +1617,85 @@ def test_run_refresh__a_withdrawn_product__is_reported_as_retained_rather_than_d
     assert "1 product(s) no longer published" in capsys.readouterr().out
 
 
+def _products(count):
+    return [f"U_P{n}_V1R1_STIG.zip" for n in range(count)]
+
+
 def test_run_refresh__drop_withdrawn__deletes_and_names_the_withdrawn_file(tmp_path, capsys):
-    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
-    opener = _Opener(_disa_bodies())
+    kept = _products(5)
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip", *kept))
+    opener = _Opener(_disa_bodies(*kept))
     fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
     out = capsys.readouterr().out
     assert not (tmp_path / "U_Foo_V1R1_STIG.zip").exists()
     assert "dropped 1 withdrawn file(s): U_Foo_V1R1_STIG.zip" in out
     assert "no longer published" not in out
     assert "Sources changed" in out
+
+
+def _drop_scenario(tmp_path, recorded, listed):
+    """Eight files recorded on disk (the library plus seven products), and a catalog listing
+    the library plus the first listed - 1 products. Returns the opener and the recorded names."""
+    names = _products(recorded - 1)
+    _fetched(tmp_path, *_selected(*names))
+    return _Opener(_disa_bodies(*names[: listed - 1])), [_LIBRARY, *names]
+
+
+def test_run_refresh__drop_withdrawn_over_a_quarter__refuses_before_downloading(tmp_path):
+    opener, recorded = _drop_scenario(tmp_path, 8, 5)
+    with pytest.raises(RuntimeError) as refusal:
+        fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
+    message = str(refusal.value)
+    assert "lists 5 of the 8 files the last fetch recorded" in message
+    assert "would delete 3 (38%), over the 25% limit" in message
+    assert "cut short" in message
+    assert "without --drop-withdrawn" in message
+    assert not [u for u in _disa_requests(opener) if not u.startswith(("POST", "HEAD"))]
+    assert all((tmp_path / name).exists() for name in recorded)
+
+
+def test_run_refresh__drop_withdrawn_at_a_quarter__proceeds(tmp_path, capsys):
+    opener, recorded = _drop_scenario(tmp_path, 8, 6)
+    fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
+    assert "dropped 2 withdrawn file(s)" in capsys.readouterr().out
+    assert sum((tmp_path / name).exists() for name in recorded) == 6
+
+
+def test_run_refresh__over_a_quarter_without_drop_withdrawn__proceeds_and_retains(tmp_path, capsys):
+    opener, recorded = _drop_scenario(tmp_path, 8, 5)
+    fetch._run_refresh(tmp_path, 0, opener=opener)
+    assert "3 product(s) no longer published" in capsys.readouterr().out
+    assert all((tmp_path / name).exists() for name in recorded)
+
+
+def test_run_refresh__drop_withdrawn_with_no_manifest__proceeds(tmp_path):
+    opener = _Opener({**_disa_bodies(*_products(2)), **{_url(n): b"x" for n in [_LIBRARY, *_products(2)]}})
+    fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
+    assert (tmp_path / _LIBRARY).exists()
+
+
+def test_would_drop__products_moved_to_new_releases__does_not_count_them(tmp_path):
+    old = _selected("U_Foo_V1R1_STIG.zip")
+    manifest = _stored(tmp_path, *[_entry(e.name) for e in old])
+    manifest["entries"]["U_SRG-STIG_Library_July_2026.zip"] = {}
+    arriving = [_entry("U_Foo_V1R2_STIG.zip"), _entry("U_SRG-STIG_Library_October_2026.zip")]
+    assert fetch.would_drop(arriving, manifest) == []
+
+
+def test_would_drop__a_loose_release_that_went_backwards__counts_the_newer_local_copy():
+    manifest = {"entries": {"U_Foo_V1R2_STIG.zip": {}}}
+    assert fetch.would_drop([_entry("U_Foo_V1R1_STIG.zip")], manifest) == ["U_Foo_V1R2_STIG.zip"]
+
+
+def test_would_drop__a_renamed_sunset_archive__counts_the_old_one():
+    manifest = {"entries": {"U_Rev_4_SRG-STIG_Sunset_Compilation.zip": {}}}
+    arriving = [_entry("U_Rev_5_SRG-STIG_Sunset_Compilation.zip")]
+    assert fetch.would_drop(arriving, manifest) == ["U_Rev_4_SRG-STIG_Sunset_Compilation.zip"]
+
+
+def test_would_drop__a_withdrawn_product_and_the_cci__counts_only_the_product():
+    manifest = {"entries": {"CCI_List.zip": {}, "U_Gone_V1R1_STIG.zip": {}, "U_Kept_V1R1_STIG.zip": {}}}
+    assert fetch.would_drop([_entry("U_Kept_V1R1_STIG.zip")], manifest) == ["U_Gone_V1R1_STIG.zip"]
 
 
 def test_run_refresh__a_catalog_that_has_not_moved__does_not_claim_the_sources_changed(tmp_path, capsys):
