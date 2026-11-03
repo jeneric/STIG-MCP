@@ -22,7 +22,6 @@ from stig_mcp.ingest import catalog, config, fetch, inventory, upstream
 from stig_mcp.ingest.fetch import _TARGET_FILENAMES, SOURCE_URLS, manual_sources
 
 FIX = Path(__file__).parent.parent / "fixtures"
-INDEX = (FIX / "disa_index.html").read_text()
 CATALOG = (FIX / "cyber_mil_catalog.json").read_text(encoding="utf-8")
 
 
@@ -76,7 +75,7 @@ def _entry(name, size_bytes=5, date="10-Jul-2026", href=None):
 
 
 def _url(name):
-    return urllib.parse.urljoin(catalog.INDEX_URL, name)
+    return urllib.parse.urljoin(catalog.ZIP_BASE, urllib.parse.quote(name))
 
 
 def _plenty(_path):
@@ -134,6 +133,10 @@ class _Opener:
     downloaded path both end with the target in the returned list, so only the absence of a
     request distinguishes them.
 
+    A body is looked up under "METHOD url" first and under the bare url second, so a HEAD and
+    a GET of one URL can answer differently. A HEAD or POST is recorded as "METHOD url" and a
+    GET as the bare url, which keeps every download assertion reading as a plain URL.
+
     A body may be bytes, an already-built response object, or an exception to raise instead
     of answering. A body may also be a list of any of those, consumed one entry per request in
     order, for a URL a retry asks for more than once.
@@ -144,8 +147,10 @@ class _Opener:
         self.requested = []
 
     def __call__(self, request, timeout=None):
-        self.requested.append(request.full_url)
-        body = self.bodies[request.full_url]
+        method, url = request.get_method(), request.full_url
+        keyed = f"{method} {url}"
+        self.requested.append(url if method == "GET" else keyed)
+        body = self.bodies[keyed] if keyed in self.bodies else self.bodies[url]
         if isinstance(body, list):
             body = body.pop(0)
         if isinstance(body, Exception):
@@ -153,10 +158,74 @@ class _Opener:
         return body if isinstance(body, io.BytesIO) else io.BytesIO(body)
 
 
-def test_selection__the_real_index__takes_library_sunset_cci_and_loose():
-    chosen = fetch.selection(catalog.parse_index(INDEX))
+class _HeadAnswer(io.BytesIO):
+    """A HEAD response: no body, and the length in a Content-Length header."""
+
+    def __init__(self, length):
+        super().__init__(b"")
+        self.headers = {"Content-Length": str(length)}
+
+    def close(self):
+        # One object answers every HEAD of its URL; a real close would make the second refuse.
+        pass
+
+
+def _head(length):
+    return _HeadAnswer(length)
+
+
+_CATALOG_POST = f"POST {catalog.CATALOG_URL}"
+
+
+def _head_key(name):
+    return f"HEAD {_url(name)}"
+
+
+def _catalog_body(*names):
+    """A catalog response listing exactly names, each a zip under ZIP_BASE."""
+    rows = [
+        {"DownloadLink": catalog.ZIP_BASE + name, "UploadDate": "2026-10-05", "FileName": name, "Title": name}
+        for name in names
+    ]
+    return json.dumps({"returnValue": rows}).encode()
+
+
+def _catalog_served(body, lengths=None):
+    """Bodies answering the catalog POST with body and a HEAD for each entry selection takes.
+
+    Each HEAD answers len(name) unless lengths overrides it, which is exactly the length
+    _fetched stores, so a selection a test has _fetched reads as unchanged and only a length
+    the test names reads as resized.
+    """
+    lengths = lengths or {}
+    text = body.decode() if isinstance(body, bytes) else body
+    chosen = fetch.selection(catalog.parse_catalog(text))
+    heads = {_head_key(e.name): _head(lengths.get(e.name, len(e.name.encode()))) for e in chosen}
+    return {_CATALOG_POST: text.encode(), **heads}
+
+
+_LIBRARY = "U_SRG-STIG_Library_July_2026.zip"
+
+
+def _disa_bodies(*names, lengths=None):
+    """The catalog and its HEADs for the July 2026 library plus names."""
+    return _catalog_served(_catalog_body(_LIBRARY, *names), lengths)
+
+
+def _selected(*names):
+    """What selection takes from a catalog of the July 2026 library plus names, unsized."""
+    return fetch.selection(catalog.parse_catalog(_catalog_body(_LIBRARY, *names)))
+
+
+def _disa_requests(opener):
+    """The requests a test sent to DISA's two hosts, in order, without the public sources'."""
+    return [u for u in opener.requested if "cyber.mil" in u]
+
+
+def test_selection__the_saved_catalog__takes_library_sunset_cci_and_loose():
+    chosen = fetch.selection(catalog.parse_catalog(CATALOG))
     names = {e.name for e in chosen}
-    assert "U_SRG-STIG_Library_July_2026.zip" in names
+    assert "U_SRG-STIG_Library_October_2026.zip" in names
     assert "U_Rev_4_SRG-STIG_Sunset_Compilation.zip" in names
     assert "U_MS_Windows_Server_2019_V3R9_STIG.zip" in names
     assert not any("SCAP" in n for n in names)
@@ -219,9 +288,9 @@ def test_manifest__written_then_read__round_trips_name_date_and_size(tmp_path):
     assert stored["entries"]["a.zip"]["size_bytes"] == 5
 
 
-def test_manifest__a_file_whose_length_differs_from_the_index__records_both_sizes_apart(tmp_path):
-    # The index's size column is rounded, so these two are different questions: what DISA
-    # advertised, and what was actually stored.
+def test_manifest__a_file_whose_length_differs_from_the_advertised_size__records_both_sizes_apart(tmp_path):
+    # These are different questions: what the server advertised, and what was actually stored.
+    # A manifest from 0.2.0 or earlier holds a rounded size in the first, so they can differ.
     (tmp_path / "a.zip").write_bytes(b"12345")
     fetch.write_manifest(tmp_path, [_entry("a.zip", size_bytes=999)])
     stored = fetch.read_manifest(tmp_path)["entries"]["a.zip"]
@@ -353,8 +422,8 @@ def test_manifest_name__is_ignored_by_the_ingest(tmp_path):
 
 
 def test_fetch_disa__a_file_still_the_length_the_manifest_recorded__is_not_downloaded_again(tmp_path):
-    # The index size (999) deliberately disagrees with the file's real length (5): a skip
-    # that compared against the index size instead of the manifest would never fire.
+    # The advertised size (999) deliberately disagrees with the file's real length (5): a skip
+    # that compared against the advertised size instead of the manifest would never fire.
     entries = [_entry("a.zip", size_bytes=999)]
     (tmp_path / "a.zip").write_bytes(b"12345")
     fetch.write_manifest(tmp_path, entries)
@@ -400,7 +469,7 @@ def test_fetch_disa__a_recorded_file_deleted_since__is_downloaded_again(tmp_path
 
 def test_fetch_disa__a_manifest_written_while_the_file_was_absent__downloads_it(tmp_path):
     # on_disk_bytes is None here, and the file that later appeared happens to be exactly the
-    # index's advertised length, so only a None-aware comparison re-fetches it.
+    # advertised length, so only a None-aware comparison re-fetches it.
     entries = [_entry("a.zip", size_bytes=5)]
     fetch.write_manifest(tmp_path, entries)
     (tmp_path / "a.zip").write_bytes(b"12345")
@@ -446,47 +515,138 @@ def test_fetch_disa__an_href_with_a_non_web_scheme__refuses_before_requesting_an
     assert opener.requested == []
 
 
-def test_fetch_disa__no_entries_given__reads_the_index_and_takes_what_selection_chose(tmp_path):
-    index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-        '<A HREF="U_Foo_V1R0_STIG.zip">old</A> 10-Jan-2026 12:00  1k\n'
-    )
+def test_fetch_disa__no_entries_given__reads_the_catalog_and_takes_what_selection_chose(tmp_path):
     opener = _Opener(
         {
-            catalog.INDEX_URL: index.encode(),
-            _url("U_SRG-STIG_Library_July_2026.zip"): b"library",
+            **_disa_bodies("U_Foo_V1R1_STIG.zip", "U_Foo_V1R0_STIG.zip"),
+            _url(_LIBRARY): b"library",
             _url("U_Foo_V1R1_STIG.zip"): b"newest",
         }
     )
     written = fetch.fetch_disa(tmp_path, opener=opener, sleep=lambda _seconds: None)
-    assert opener.requested[0] == catalog.INDEX_URL
-    assert opener.requested[1:] == [_url("U_SRG-STIG_Library_July_2026.zip"), _url("U_Foo_V1R1_STIG.zip")]
-    assert [p.name for p in written] == ["U_SRG-STIG_Library_July_2026.zip", "U_Foo_V1R1_STIG.zip"]
+    assert opener.requested == [
+        _CATALOG_POST,
+        _head_key(_LIBRARY),
+        _head_key("U_Foo_V1R1_STIG.zip"),
+        _url(_LIBRARY),
+        _url("U_Foo_V1R1_STIG.zip"),
+    ]
+    assert [p.name for p in written] == [_LIBRARY, "U_Foo_V1R1_STIG.zip"]
+    # The manifest records the HEAD's exact length, not a rounded listing size.
+    stored = fetch.read_manifest(tmp_path)["entries"]
+    assert stored["U_Foo_V1R1_STIG.zip"]["size_bytes"] == len(b"U_Foo_V1R1_STIG.zip")
 
 
-def test_fetch_disa__no_entries_given_and_the_index_read_resets_once__retries_it(tmp_path):
-    # The index read itself can fail transiently (errno 101), not only a download.
-    # fetch_disa's OWN index read (taken when entries is None) must retry it, distinct from
-    # _run_refresh's separately wrapped index read.
-    index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-        '<A HREF="U_Foo_V1R0_STIG.zip">old</A> 10-Jan-2026 12:00  1k\n'
-    )
-    opener = _Opener(
-        {
-            catalog.INDEX_URL: [urllib.error.URLError(OSError(101, "Network is unreachable")), index.encode()],
-            _url("U_SRG-STIG_Library_July_2026.zip"): b"library",
-            _url("U_Foo_V1R1_STIG.zip"): b"newest",
-        }
-    )
+def test_fetch_disa__no_entries_given_and_the_catalog_read_resets_once__retries_it(tmp_path):
+    # The catalog read itself can fail transiently (errno 101), not only a download.
+    # fetch_disa's OWN catalog read (taken when entries is None) must retry it, distinct from
+    # _run_refresh's separately wrapped read.
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip", "U_Foo_V1R0_STIG.zip")
+    bodies[_CATALOG_POST] = [urllib.error.URLError(OSError(101, "Network is unreachable")), bodies[_CATALOG_POST]]
+    opener = _Opener({**bodies, _url(_LIBRARY): b"library", _url("U_Foo_V1R1_STIG.zip"): b"newest"})
     pauses = []
     written = fetch.fetch_disa(tmp_path, opener=opener, sleep=pauses.append)
-    assert opener.requested[:2] == [catalog.INDEX_URL, catalog.INDEX_URL]
-    assert opener.requested[2:] == [_url("U_SRG-STIG_Library_July_2026.zip"), _url("U_Foo_V1R1_STIG.zip")]
+    assert opener.requested[:2] == [_CATALOG_POST, _CATALOG_POST]
+    assert opener.requested[-2:] == [_url(_LIBRARY), _url("U_Foo_V1R1_STIG.zip")]
     assert pauses[:1] == [5]
-    assert [p.name for p in written] == ["U_SRG-STIG_Library_July_2026.zip", "U_Foo_V1R1_STIG.zip"]
+    assert [p.name for p in written] == [_LIBRARY, "U_Foo_V1R1_STIG.zip"]
+
+
+def test_disa_selection__catalog_and_heads__sizes_every_selected_entry():
+    lengths = {_LIBRARY: 7_000_001, "U_Foo_V1R1_STIG.zip": 1_234_567, "CCI_List.zip": 333}
+    opener = _Opener(_disa_bodies("U_Foo_V1R1_STIG.zip", "U_Foo_V1R0_STIG.zip", "CCI_List.zip", lengths=lengths))
+    chosen = fetch.disa_selection(opener=opener, pause=lambda _seconds: None)
+    assert {e.name: e.size_bytes for e in chosen} == lengths
+    assert opener.requested[0] == _CATALOG_POST
+    assert sorted(opener.requested[1:]) == sorted(_head_key(name) for name in lengths)
+
+
+def test_disa_selection__a_name_with_a_space__sizes_it_through_the_quoted_url():
+    # The real catalog carries such a name; an unquoted HEAD would never reach the file.
+    name = "U_Splunk_Enterprise_8-x_for Linux_V2R3_STIG.zip"
+    opener = _Opener(_disa_bodies(name, lengths={name: 42}))
+    chosen = fetch.disa_selection(opener=opener, pause=lambda _seconds: None)
+    assert {e.name: e.size_bytes for e in chosen}[name] == 42  # noqa: PLR2004
+    assert f"HEAD {catalog.ZIP_BASE}U_Splunk_Enterprise_8-x_for%20Linux_V2R3_STIG.zip" in opener.requested
+
+
+def test_disa_selection__a_head_that_resets_once__retries_it():
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    reset = urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = [reset, _head(5)]
+    pauses = []
+    chosen = fetch.disa_selection(opener=_Opener(bodies), pause=pauses.append)
+    assert {e.name: e.size_bytes for e in chosen}["U_Foo_V1R1_STIG.zip"] == 5  # noqa: PLR2004
+    assert pauses == [fetch.RETRY_BACKOFF[0]]
+
+
+def test_disa_selection__a_head_answering_404__raises_it():
+    # Decision 10: a HEAD failure fails the selection; an unsized entry must never reach diff.
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    missing = urllib.error.HTTPError(_url("U_Foo_V1R1_STIG.zip"), 404, "Not Found", {}, None)
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = missing
+    pauses = []
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        fetch.disa_selection(opener=_Opener(bodies), pause=pauses.append)
+    assert excinfo.value is missing
+    assert pauses == []
+
+
+def test_run_check__a_head_that_fails__reports_disa_unknown_and_returns_could_not_check(tmp_path, capsys):
+    fetch.fetch_public(tmp_path, opener=_Opener(_public_bodies()))
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    lengthless = _head(0)
+    lengthless.headers = {"Content-Length": ""}
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = lengthless
+    code = fetch._run_check(tmp_path, opener=_Opener({**_public_bodies(), **bodies}))
+    lines = capsys.readouterr().out.splitlines()
+    assert code == fetch.EXIT_COULD_NOT_CHECK
+    assert any(line.startswith("  DISA: unknown (") and "Content-Length" in line for line in lines)
+
+
+def test_disa_selection__a_catalog_read_that_resets_once__retries_it():
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    bodies[_CATALOG_POST] = [urllib.error.URLError(OSError(101, "Network is unreachable")), bodies[_CATALOG_POST]]
+    pauses = []
+    opener = _Opener(bodies)
+    chosen = fetch.disa_selection(opener=opener, pause=pauses.append)
+    assert [e.name for e in chosen] == [_LIBRARY, "U_Foo_V1R1_STIG.zip"]
+    assert opener.requested[:2] == [_CATALOG_POST, _CATALOG_POST]
+    assert pauses == [fetch.RETRY_BACKOFF[0]]
+
+
+def test_disa_selection__catalog_answers_404__names_the_classname():
+    missing = urllib.error.HTTPError(catalog.CATALOG_URL, 404, "Not Found", {}, None)
+    pauses = []
+    with pytest.raises(RuntimeError, match=re.escape(catalog.CATALOG_CLASSNAME)) as excinfo:
+        fetch.disa_selection(opener=_Opener({_CATALOG_POST: missing}), pause=pauses.append)
+    assert excinfo.value.__cause__ is missing
+    assert pauses == []
+
+
+def test_disa_selection__catalog_answers_503_every_time__raises_the_last_503_unchanged():
+    # A server outage is not a moved class id, so it must not be reported as one.
+    outage = urllib.error.HTTPError(catalog.CATALOG_URL, 503, "Service Unavailable", {}, None)
+    pauses = []
+    opener = _Opener({_CATALOG_POST: [outage] * fetch.RETRY_ATTEMPTS})
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        fetch.disa_selection(opener=opener, pause=pauses.append)
+    assert excinfo.value is outage
+    assert pauses == list(fetch.RETRY_BACKOFF)
+
+
+def test_disa_selection__no_opener_given__opens_the_truststore_opener_once_for_every_request(monkeypatch):
+    built = []
+
+    def one_opener(*_handlers):
+        built.append(_Opener(_disa_bodies("U_Foo_V1R1_STIG.zip")))
+        return built[-1]
+
+    monkeypatch.setattr(tls, "opener", one_opener)
+    fetch.disa_selection(pause=lambda _seconds: None)
+    assert len(built) == 1
+    assert len(built[0].requested) == 3  # noqa: PLR2004  the POST and two HEADs
 
 
 def test_fetch_disa__a_third_run_after_a_download_and_a_skip__still_skips(tmp_path):
@@ -886,6 +1046,14 @@ def _manifest(tmp_path, *entries):
     return fetch.read_manifest(tmp_path)
 
 
+def _stored(tmp_path, *entries):
+    """The manifest a completed fetch of entries leaves: each file on disk at exactly the
+    size_bytes its HEAD advertised, so on_disk_bytes agrees with an unchanged HEAD."""
+    for entry in entries:
+        (tmp_path / entry.name).write_bytes(b"x" * entry.size_bytes)
+    return _manifest(tmp_path, *entries)
+
+
 def test_diff__a_bulk_reupload_moving_every_date__reports_nothing_changed(tmp_path):
     # THE test for this function. Most entries on the live index share one bulk re-upload
     # date, so if change detection used dates, another bulk re-upload would report nearly
@@ -893,24 +1061,24 @@ def test_diff__a_bulk_reupload_moving_every_date__reports_nothing_changed(tmp_pa
     # a NEW NAME.
     before = [catalog.Entry(name="a.zip", href="a.zip", date="28-Apr-2026", size_bytes=10)]
     after = [catalog.Entry(name="a.zip", href="a.zip", date="01-Dec-2026", size_bytes=10)]
-    assert fetch.diff(after, _manifest(tmp_path, *before)) == {"new": [], "resized": [], "withdrawn": []}
+    assert fetch.diff(after, _stored(tmp_path, *before)) == {"new": [], "resized": [], "withdrawn": []}
 
 
 def test_diff__a_new_release_filename__is_reported_as_new(tmp_path):
     before = [catalog.Entry(name="U_X_V1R1_STIG.zip", href="a", date="10-Jul-2026", size_bytes=10)]
     after = [*before, catalog.Entry(name="U_X_V1R2_STIG.zip", href="b", date="27-Jul-2026", size_bytes=11)]
-    assert fetch.diff(after, _manifest(tmp_path, *before))["new"] == ["U_X_V1R2_STIG.zip"]
+    assert fetch.diff(after, _stored(tmp_path, *before))["new"] == ["U_X_V1R2_STIG.zip"]
 
 
 def test_diff__a_name_the_index_no_longer_carries__is_reported_as_withdrawn(tmp_path):
     before = [catalog.Entry(name="gone.zip", href="a", date="10-Jul-2026", size_bytes=10)]
-    assert fetch.diff([], _manifest(tmp_path, *before))["withdrawn"] == ["gone.zip"]
+    assert fetch.diff([], _stored(tmp_path, *before))["withdrawn"] == ["gone.zip"]
 
 
 def test_diff__the_same_name_at_a_different_size__is_reported_as_resized(tmp_path):
     before = [catalog.Entry(name="a.zip", href="a", date="10-Jul-2026", size_bytes=10)]
     after = [catalog.Entry(name="a.zip", href="a", date="10-Jul-2026", size_bytes=99)]
-    assert fetch.diff(after, _manifest(tmp_path, *before))["resized"] == ["a.zip"]
+    assert fetch.diff(after, _stored(tmp_path, *before))["resized"] == ["a.zip"]
 
 
 def test_diff__every_state_at_once__reports_only_the_names_that_actually_changed(tmp_path):
@@ -929,45 +1097,47 @@ def test_diff__every_state_at_once__reports_only_the_names_that_actually_changed
         catalog.Entry(name="resized.zip", href="a", date="10-Jul-2026", size_bytes=99),
         catalog.Entry(name="new.zip", href="a", date="10-Jul-2026", size_bytes=10),
     ]
-    assert fetch.diff(after, _manifest(tmp_path, *before)) == {
+    assert fetch.diff(after, _stored(tmp_path, *before)) == {
         "new": ["new.zip"],
         "resized": ["resized.zip"],
         "withdrawn": ["withdrawn.zip"],
     }
 
 
-def test_diff__the_manifests_on_disk_bytes_disagreeing_with_index_size__is_never_consulted(tmp_path):
-    # size_bytes and on_disk_bytes answer different questions (see write_manifest's docstring):
-    # size_bytes is what the index advertised, on_disk_bytes is what a run actually stored.
-    # Writing a real 5-byte file under a 999-byte index entry makes the two disagree on
-    # purpose; a diff that read on_disk_bytes instead of size_bytes would misreport this as
-    # resized even though the index side never changed.
-    (tmp_path / "a.zip").write_bytes(b"12345")
-    entries = [catalog.Entry(name="a.zip", href="a", date="10-Jul-2026", size_bytes=999)]
-    fetch.write_manifest(tmp_path, entries)
-    manifest = fetch.read_manifest(tmp_path)
-    assert manifest["entries"]["a.zip"]["on_disk_bytes"] == 5  # sanity: the two sizes disagree
-    after = [catalog.Entry(name="a.zip", href="a", date="10-Jul-2026", size_bytes=999)]
-    assert fetch.diff(after, manifest)["resized"] == []
+def test_diff__manifest_from_0_2_0_with_rounded_sizes__reports_nothing_resized():
+    # 0.2.0 recorded the listing's rounded size in size_bytes; on_disk_bytes is the file's real
+    # length, which is what a HEAD measures, so the first run after the switch re-fetches nothing.
+    manifest = {"entries": {"a.zip": {"size_bytes": 2283520, "on_disk_bytes": 2282653}}}
+    entry = catalog.Entry(name="a.zip", href="a.zip", date="2026-10-05", size_bytes=2282653)
+    assert fetch.diff([entry], manifest)["resized"] == []
+
+
+def test_diff__head_length_differs_from_on_disk__reports_resized():
+    # size_bytes agreeing with the HEAD must not save it: only on_disk_bytes is compared.
+    manifest = {"entries": {"a.zip": {"size_bytes": 101, "on_disk_bytes": 100}}}
+    entry = catalog.Entry(name="a.zip", href="a.zip", date="2026-10-05", size_bytes=101)
+    assert fetch.diff([entry], manifest)["resized"] == ["a.zip"]
+
+
+def test_diff__on_disk_bytes_none__reports_resized():
+    manifest = {"entries": {"a.zip": {"size_bytes": 100, "on_disk_bytes": None}}}
+    entry = catalog.Entry(name="a.zip", href="a.zip", date="2026-10-05", size_bytes=100)
+    assert fetch.diff([entry], manifest)["resized"] == ["a.zip"]
 
 
 def test_run_check__sources_matching_the_manifest__reports_current_and_returns_zero(tmp_path, capsys):
     fetch.fetch_public(tmp_path, opener=_Opener(_public_bodies()))
-    entries = catalog.parse_index(INDEX)
-    fetch.write_manifest(tmp_path, fetch.selection(entries))
-    opener = _Opener({**_public_bodies(), catalog.INDEX_URL: INDEX.encode()})
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
+    opener = _Opener({**_public_bodies(), **_catalog_served(CATALOG)})
     assert fetch._run_check(tmp_path, opener=opener) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "All sources are current."
 
 
-def test_run_check__a_newer_release_on_the_index__reports_new_and_the_superseded_release_as_withdrawn(tmp_path, capsys):
-    before_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-    )
-    after_index = before_index + '<A HREF="U_Foo_V1R2_STIG.zip">foo2</A> 27-Jul-2026 12:00  1k\n'
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode()})
+def test_run_check__a_newer_release_in_the_catalog__reports_new_and_the_superseded_release_as_withdrawn(
+    tmp_path, capsys
+):
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies("U_Foo_V1R1_STIG.zip", "U_Foo_V1R2_STIG.zip"))
     code = fetch._run_check(tmp_path, opener=opener)
     out = capsys.readouterr().out
     lines = out.splitlines()
@@ -986,17 +1156,8 @@ def test_run_check__a_newer_release_on_the_index__reports_new_and_the_superseded
 def test_run_check__a_withdrawal_unrelated_to_any_new_release__is_reported_without_a_superseded_note(tmp_path, capsys):
     # Two products change at once: Bar bumps version (superseded), Foo simply disappears from
     # the index (a real withdrawal). The matcher must not cross-wire the two.
-    before_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-        '<A HREF="U_Bar_V1R1_STIG.zip">bar</A> 10-Jul-2026 12:00  1k\n'
-    )
-    after_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Bar_V2R1_STIG.zip">bar2</A> 27-Jul-2026 12:00  1k\n'
-    )
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode()})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip", "U_Bar_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies("U_Bar_V2R1_STIG.zip"))
     fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
     assert "  new: U_Bar_V2R1_STIG.zip" in lines
@@ -1011,17 +1172,8 @@ def test_run_check__a_withdrawal_sharing_a_product_but_not_a_version_scheme__is_
     # (catalog.newest_per_product's docstring). release_of's own rule is that a V/R release and
     # a Y/M release of the same product are not comparable, so a V/R withdrawal must never be
     # reported as superseded by an unrelated Y/M release just because the name text overlaps.
-    before_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Widget_V1R1_STIG.zip">w1</A> 10-Jul-2026 12:00  1k\n'
-        '<A HREF="U_Widget_Y23M04_STIG.zip">w2</A> 10-Jul-2026 12:00  1k\n'
-    )
-    after_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Widget_Y26M01_STIG.zip">w3</A> 27-Jul-2026 12:00  1k\n'
-    )
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode()})
+    _fetched(tmp_path, *_selected("U_Widget_V1R1_STIG.zip", "U_Widget_Y23M04_STIG.zip"))
+    opener = _Opener(_disa_bodies("U_Widget_Y26M01_STIG.zip"))
     fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
     assert "  withdrawn: U_Widget_V1R1_STIG.zip" in lines
@@ -1032,17 +1184,8 @@ def test_run_check__a_withdrawn_name_with_no_version_pattern__is_reported_withou
     # CCI_List.zip carries no _V#R#_ or _Y##M##_ suffix at all, unlike a benchmark filename,
     # so it can never be matched to a replacement even while an unrelated product bumps
     # version in the same run.
-    before_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="CCI_List.zip">cci</A> 10-Jul-2026 12:00  400k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-    )
-    after_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R2_STIG.zip">foo2</A> 27-Jul-2026 12:00  1k\n'
-    )
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode()})
+    _fetched(tmp_path, *_selected("CCI_List.zip", "U_Foo_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies("U_Foo_V1R2_STIG.zip"))
     fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
     assert "  withdrawn: CCI_List.zip" in lines
@@ -1050,14 +1193,9 @@ def test_run_check__a_withdrawn_name_with_no_version_pattern__is_reported_withou
 
 
 def test_run_check__only_a_withdrawal__does_not_claim_sources_are_current(tmp_path, capsys):
-    before_index = (
-        '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
-    )
-    after_index = '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(before_index)))
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
     fetch.fetch_public(tmp_path, opener=_Opener(_public_bodies()))
-    opener = _Opener({**_public_bodies(), catalog.INDEX_URL: after_index.encode()})
+    opener = _Opener({**_public_bodies(), **_disa_bodies()})
     code = fetch._run_check(tmp_path, opener=opener)
     out = capsys.readouterr().out
     assert code == 0
@@ -1069,10 +1207,11 @@ def test_run_check__only_a_withdrawal__does_not_claim_sources_are_current(tmp_pa
 def _new_entry(name):
     """An arriving entry whose advertised size CANNOT be the length that lands on disk.
 
-    The index's size column is a rounded display value that almost never equals the stored
-    length (_already_downloaded's docstring). A prune that verified an arrival against
-    size_bytes would therefore verify nothing on a real run, so every test below must FAIL
-    in that case rather than quietly agree with it.
+    size_bytes is what the server advertised before the download, not what arrived, and a
+    manifest from 0.2.0 or earlier holds a rounded value there that almost never equals the
+    stored length (_already_downloaded's docstring). A prune that verified an arrival against
+    size_bytes would therefore verify nothing, so every test below must FAIL in that case
+    rather than quietly agree with it.
     """
     return _entry(name, size_bytes=999_999)
 
@@ -1417,53 +1556,50 @@ def test_prune__drop_withdrawn_a_replaced_sunset_archive__is_dropped(tmp_path):
     assert result["dropped"] == [old.name]
 
 
-def _index_rows(*rows):
-    return "".join(['<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n', *rows])
-
-
-def test_run_refresh__an_index_read_that_resets_once__retries_it(tmp_path, monkeypatch, capsys):
+def test_run_refresh__a_catalog_read_that_resets_once__retries_it(tmp_path, monkeypatch, capsys):
     # _run_refresh has no injectable sleep of its own (unlike fetch_disa), so the pause between
-    # its own retried index read goes through time.sleep directly; the test silences that sleep
-    # rather than waiting out the real 5 seconds.
+    # its own retried catalog read goes through time.sleep directly; the test silences that
+    # sleep rather than waiting out the real 5 seconds.
     monkeypatch.setattr(fetch.time, "sleep", lambda _seconds: None)
-    index = _index_rows()
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(index)))
+    _fetched(tmp_path, *_selected())
+    bodies = _disa_bodies()
     unreachable = urllib.error.URLError(OSError(101, "Network is unreachable"))
-    opener = _Opener({catalog.INDEX_URL: [unreachable, index.encode()]})
+    bodies[_CATALOG_POST] = [unreachable, bodies[_CATALOG_POST]]
+    opener = _Opener(bodies)
     fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
-    disa_requests = [u for u in opener.requested if u.startswith(catalog.INDEX_URL)]
-    assert disa_requests == [catalog.INDEX_URL, catalog.INDEX_URL]
+    assert _disa_requests(opener) == [_CATALOG_POST, _CATALOG_POST, _head_key(_LIBRARY)]
     assert "already current" in out
 
 
 def test_run_refresh__a_new_release__downloads_it_and_deletes_what_it_supersedes(tmp_path, capsys):
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    after_index = _index_rows('<A HREF="U_Foo_V1R2_STIG.zip">foo2</A> 27-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode(), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener({**_disa_bodies("U_Foo_V1R2_STIG.zip"), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
     fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
     assert (tmp_path / "U_Foo_V1R2_STIG.zip").read_bytes() == b"new release"
     assert not (tmp_path / "U_Foo_V1R1_STIG.zip").exists()
-    # The library was already on disk at its recorded length, so only the new release is
-    # requested; the index read is the other DISA request. Public checks add their own
-    # discovery requests ahead of these, so only the DISA-hosted URLs are compared here.
-    disa_requests = [u for u in opener.requested if u.startswith(catalog.INDEX_URL)]
-    assert disa_requests == [catalog.INDEX_URL, _url("U_Foo_V1R2_STIG.zip")]
+    # The library was already on disk at the length its HEAD reports, so only the new release
+    # is downloaded; the catalog read and one HEAD per selected entry are the other DISA
+    # requests. Public checks add their own discovery requests ahead of these, so only the
+    # DISA-hosted URLs are compared here.
+    assert _disa_requests(opener) == [
+        _CATALOG_POST,
+        _head_key(_LIBRARY),
+        _head_key("U_Foo_V1R2_STIG.zip"),
+        _url("U_Foo_V1R2_STIG.zip"),
+    ]
     assert "fetched 1 changed artifact(s)" in out
     assert "deleted 1 superseded file(s)" in out
     assert "stig-mcp-ingest" in out
 
 
-def test_run_refresh__a_completed_run__leaves_a_manifest_naming_exactly_what_the_index_carries(tmp_path):
+def test_run_refresh__a_completed_run__leaves_a_manifest_naming_exactly_what_the_catalog_carries(tmp_path):
     # fetch_disa writes the manifest from the entries it was given, so a pruned name is
     # already absent from it. A second write_manifest call here would re-hash roughly a
     # gigabyte to produce the same file, against write_manifest's own "call it once" rule.
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    after_index = _index_rows('<A HREF="U_Foo_V1R2_STIG.zip">foo2</A> 27-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode(), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener({**_disa_bodies("U_Foo_V1R2_STIG.zip"), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
     fetch._run_refresh(tmp_path, 0, opener=opener)
     stored = fetch.read_manifest(tmp_path)["entries"]
     assert set(stored) == {"U_SRG-STIG_Library_July_2026.zip", "U_Foo_V1R2_STIG.zip"}
@@ -1471,18 +1607,16 @@ def test_run_refresh__a_completed_run__leaves_a_manifest_naming_exactly_what_the
 
 
 def test_run_refresh__a_withdrawn_product__is_reported_as_retained_rather_than_deleted(tmp_path, capsys):
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: _index_rows().encode()})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies())
     fetch._run_refresh(tmp_path, 0, opener=opener)
     assert (tmp_path / "U_Foo_V1R1_STIG.zip").exists()
     assert "1 product(s) no longer published" in capsys.readouterr().out
 
 
 def test_run_refresh__drop_withdrawn__deletes_and_names_the_withdrawn_file(tmp_path, capsys):
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: _index_rows().encode()})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies())
     fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
     out = capsys.readouterr().out
     assert not (tmp_path / "U_Foo_V1R1_STIG.zip").exists()
@@ -1491,19 +1625,17 @@ def test_run_refresh__drop_withdrawn__deletes_and_names_the_withdrawn_file(tmp_p
     assert "Sources changed" in out
 
 
-def test_run_refresh__an_index_that_has_not_moved__does_not_claim_the_sources_changed(tmp_path, capsys):
-    # The commonest run of all: a quarterly refresh against an index that has not moved. Saying
-    # the sources changed here costs the operator a full knowledge base rebuild for nothing,
-    # and _run_check already refuses to misdescribe a run for the same reason.
-    index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(index)))
-    opener = _Opener({catalog.INDEX_URL: index.encode()})
+def test_run_refresh__a_catalog_that_has_not_moved__does_not_claim_the_sources_changed(tmp_path, capsys):
+    # The commonest run of all: a quarterly refresh against a catalog that has not moved.
+    # Saying the sources changed here costs the operator a full knowledge base rebuild for
+    # nothing, and _run_check already refuses to misdescribe a run for the same reason.
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener(_disa_bodies("U_Foo_V1R1_STIG.zip"))
     fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
     # Public checks add their own discovery requests ahead of the DISA ones; only the
-    # DISA-hosted URL is compared here.
-    disa_requests = [u for u in opener.requested if u.startswith(catalog.INDEX_URL)]
-    assert disa_requests == [catalog.INDEX_URL]
+    # DISA-hosted requests are compared here, and none of them is a download.
+    assert _disa_requests(opener) == [_CATALOG_POST, _head_key(_LIBRARY), _head_key("U_Foo_V1R1_STIG.zip")]
     assert "Sources changed" not in out
     assert "already current" in out
 
@@ -1515,7 +1647,7 @@ def test_run_refresh__the_delay_it_was_given__is_the_one_the_downloads_are_space
     monkeypatch.setattr(
         fetch, "fetch_disa", lambda dest_dir, opener=None, delay=0.25, entries=None: spacing.append(delay)
     )
-    opener = _Opener({catalog.INDEX_URL: _index_rows().encode()})
+    opener = _Opener(_disa_bodies())
     fetch._run_refresh(tmp_path, 7.5, opener=opener)
     assert spacing == [7.5]
 
@@ -1527,7 +1659,7 @@ def test_run_refresh__a_download_that_fails__names_the_manual_fallback(monkeypat
         raise RuntimeError("simulated DISA outage")
 
     monkeypatch.setattr(fetch, "fetch_disa", fail)
-    opener = _Opener({catalog.INDEX_URL: _index_rows().encode()})
+    opener = _Opener(_disa_bodies())
     with pytest.raises(RuntimeError, match="simulated DISA outage"):
         fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
@@ -1545,7 +1677,7 @@ def test_run_refresh__a_download_that_fails__never_reaches_prune(monkeypatch, tm
     calls = []
     monkeypatch.setattr(fetch, "fetch_disa", fail)
     monkeypatch.setattr(fetch, "prune", lambda *args: calls.append(args))
-    opener = _Opener({catalog.INDEX_URL: _index_rows().encode()})
+    opener = _Opener(_disa_bodies())
     with pytest.raises(RuntimeError, match="simulated DISA outage"):
         fetch._run_refresh(tmp_path, 0, opener=opener)
     assert calls == []
@@ -1841,9 +1973,9 @@ def test_take_public__ctid_alone_and_the_fallback_index_read_fails__records_no_r
 
 
 def test_run_check__newer_attack_upstream__prints_it_and_returns_ten(tmp_path, capsys):
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(INDEX)))
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
     fetch.write_public(tmp_path, "attack", {"version": "19.1", "url": "u", "sha256": "s", "release_date": None})
-    opener = _Opener({**_public_bodies(), catalog.INDEX_URL: INDEX.encode()})
+    opener = _Opener({**_public_bodies(), **_catalog_served(CATALOG)})
     code = fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
     assert code == 10
@@ -1853,27 +1985,26 @@ def test_run_check__newer_attack_upstream__prints_it_and_returns_ten(tmp_path, c
 def test_run_check__public_sources_unreachable_but_disa_current__returns_could_not_check_and_says_unknown(
     tmp_path, capsys
 ):
-    entries = catalog.parse_index(INDEX)
-    fetch.write_manifest(tmp_path, fetch.selection(entries))
-    opener = _Opener({catalog.INDEX_URL: INDEX.encode()})
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
+    opener = _Opener(_catalog_served(CATALOG))
     assert fetch._run_check(tmp_path, opener=opener) == fetch.EXIT_COULD_NOT_CHECK
     assert "  ATT&CK: unknown" in capsys.readouterr().out
 
 
 def test_run_check__attack_current__prints_current_with_the_version(tmp_path, capsys):
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(INDEX)))
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
     fetch.write_public(tmp_path, "attack", {"version": "19.2", "url": "u", "sha256": "s", "release_date": None})
-    opener = _Opener({**_public_bodies(), catalog.INDEX_URL: INDEX.encode()})
+    opener = _Opener({**_public_bodies(), **_catalog_served(CATALOG)})
     fetch._run_check(tmp_path, opener=opener)
     assert "  ATT&CK: current (19.2)" in capsys.readouterr().out.splitlines()
 
 
-def test_run_check__disa_index_unreachable_but_public_sources_current__prints_unknown_and_returns_could_not_check(
+def test_run_check__disa_catalog_unreachable_but_public_sources_current__prints_unknown_and_returns_could_not_check(
     tmp_path, capsys
 ):
-    fetch.write_manifest(tmp_path, fetch.selection(catalog.parse_index(INDEX)))
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
     fetch.fetch_public(tmp_path, opener=_Opener(_public_bodies()))
-    opener = _Opener(_public_bodies())  # no catalog.INDEX_URL entry, so the DISA listing fails
+    opener = _Opener(_public_bodies())  # no catalog POST entry, so the DISA catalog read fails
     code = fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
     assert code == fetch.EXIT_COULD_NOT_CHECK
@@ -1932,8 +2063,8 @@ def test_run_check__catalog_on_disk_but_unrecorded__does_not_call_it_current(tmp
     fetch.write_public(
         tmp_path, "ctid", {"attack_version": "16.1", "url": "u", "sha256": "s", "attack_release_date": None}
     )
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(INDEX)))
-    code = fetch._run_check(tmp_path, opener=_Opener({**_public_bodies(), catalog.INDEX_URL: INDEX.encode()}))
+    _fetched(tmp_path, *fetch.selection(catalog.parse_catalog(CATALOG)))
+    code = fetch._run_check(tmp_path, opener=_Opener({**_public_bodies(), **_catalog_served(CATALOG)}))
     lines = capsys.readouterr().out.splitlines()
     catalog_line = next(line for line in lines if line.startswith("  NIST catalog:"))
     assert catalog_line == "  NIST catalog: matches upstream, but no version is recorded; --refresh will record it"
@@ -1941,10 +2072,9 @@ def test_run_check__catalog_on_disk_but_unrecorded__does_not_call_it_current(tmp
 
 
 def test_run_refresh__newer_attack_upstream__downloads_it_and_says_to_ingest(tmp_path, capsys):
-    before = _index_rows()
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before)))
+    _fetched(tmp_path, *_selected())
     fetch.write_public(tmp_path, "attack", {"version": "19.1", "url": "u", "sha256": "s", "release_date": None})
-    opener = _Opener({**_public_bodies(attack=b'{"objects": ["new"]}'), catalog.INDEX_URL: before.encode()})
+    opener = _Opener({**_public_bodies(attack=b'{"objects": ["new"]}'), **_disa_bodies()})
     fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
     assert (tmp_path / "enterprise-attack.json").read_bytes() == b'{"objects": ["new"]}'
@@ -1954,10 +2084,8 @@ def test_run_refresh__newer_attack_upstream__downloads_it_and_says_to_ingest(tmp
 
 
 def test_run_refresh__public_source_unreachable__still_refreshes_disa_and_names_it(tmp_path, capsys):
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    after_index = _index_rows('<A HREF="U_Foo_V1R2_STIG.zip">foo2</A> 27-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    opener = _Opener({catalog.INDEX_URL: after_index.encode(), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    opener = _Opener({**_disa_bodies("U_Foo_V1R2_STIG.zip"), _url("U_Foo_V1R2_STIG.zip"): b"new release"})
     fetch._run_refresh(tmp_path, 0, opener=opener)
     out = capsys.readouterr().out
     assert (tmp_path / "U_Foo_V1R2_STIG.zip").read_bytes() == b"new release"
@@ -1965,13 +2093,12 @@ def test_run_refresh__public_source_unreachable__still_refreshes_disa_and_names_
 
 
 def test_run_refresh__public_source_fails_with_a_long_message__prints_the_whole_reason(tmp_path, capsys):
-    before_index = _index_rows('<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n')
-    _fetched(tmp_path, *fetch.selection(catalog.parse_index(before_index)))
-    disa = _Opener({catalog.INDEX_URL: before_index.encode()})
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    disa = _Opener(_disa_bodies("U_Foo_V1R1_STIG.zip"))
     remedy = "Check the proxy settings and run the refresh again."
 
     def github_refused(request, timeout=None):
-        if request.full_url.startswith(catalog.INDEX_URL):
+        if "cyber.mil" in request.full_url:
             return disa(request, timeout)
         raise OSError("z" * 400 + " " + remedy)
 
@@ -2000,8 +2127,8 @@ def test_run_refresh__public_download_fails__stops_before_disa_and_keeps_the_pre
     assert not list(tmp_path.glob("*.part"))
     # The check itself never touches DISA (currency.public_report checks only the public
     # sources); this asserts the DOWNLOAD failure stopped _run_refresh before it reached the
-    # `selection(...)` line that would have made the first DISA request.
-    assert not any(u.startswith(catalog.INDEX_URL) for u in opener.requested)
+    # disa_selection call that would have made the first DISA request.
+    assert _disa_requests(opener) == []
     after_names = {p.name for p in tmp_path.iterdir()}
     assert before_names <= after_names
 

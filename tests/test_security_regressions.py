@@ -6,7 +6,7 @@ rejects or neutralizes it:
   - S310: the fetcher must refuse non-http(s) source URLs before any retrieval.
   - S608: a malicious stig_id must be bound as a literal, never injected into SQL.
   - no S rule: a caller-supplied digit run must not crash the resolver on int() conversion.
-  - no S rule: a remote index entry or a manifest key must not name a path, since every
+  - no S rule: a remote catalog entry or a manifest key must not name a path, since every
     caller joins it onto the sources directory to write to and to unlink.
   - no S rule: a remote version, folder name or date written in non-ASCII digits must not
     outrank a real release or pass as a date.
@@ -153,11 +153,22 @@ class _PlentyOfDisk:
 _PLENTY_OF_DISK = _PlentyOfDisk()
 
 
-def _always_serving(payload):
-    """An opener that answers every URL, so a request that escapes is served rather than
-    raising a KeyError before the write it is meant to demonstrate."""
+class _HeadAnswer(io.BytesIO):
+    def __init__(self, length):
+        super().__init__(b"")
+        self.headers = {"Content-Length": str(length)}
 
-    def open_url(_request, timeout=None):
+
+def _always_serving(catalog_body, payload):
+    """An opener that answers the catalog POST with catalog_body and every other URL with
+    payload, a HEAD with its length, so a request that escapes is served rather than raising
+    a KeyError before the write it is meant to demonstrate."""
+
+    def open_url(request, timeout=None):
+        if request.get_method() == "POST":
+            return io.BytesIO(catalog_body.encode())
+        if request.get_method() == "HEAD":
+            return _HeadAnswer(len(payload))
         return io.BytesIO(payload)
 
     return open_url
@@ -176,11 +187,6 @@ def test_require_bare_name__a_name_that_is_not_a_plain_filename__raises_ValueErr
 @pytest.mark.parametrize("name", _REAL_NAMES)
 def test_require_bare_name__a_name_the_real_index_publishes__is_accepted(name):
     fetch.require_bare_name(name)  # no exception
-
-
-def _sized(entries):
-    # fetch_disa still sums size_bytes, which parse_catalog leaves None until head_length fills it.
-    return [entry._replace(size_bytes=1) for entry in entries]
 
 
 def _catalog_body(link):
@@ -230,11 +236,14 @@ def test_fetch_disa__a_catalog_row_that_leaves_the_destination__writes_nothing_o
     dest.mkdir()
     escaped = tmp_path / "ESCAPED.zip"
     body = _catalog_body(catalog.ZIP_BASE + "../ESCAPED.zip")
-    opener = _always_serving(b"payload an unguarded run would write outside dest")
+    opener = _always_serving(body, b"payload an unguarded run would write outside dest")
     with contextlib.suppress(ValueError):
         # The parse is inside the suppression because the guard is what raises; without it
-        # the whole call runs and the download lands outside dest.
-        fetch.fetch_disa(dest, opener=opener, entries=_sized(catalog.parse_catalog(body)))
+        # the whole call runs and the download lands outside dest. The entries are handed to
+        # fetch_disa rather than read through disa_selection, whose selection takes no
+        # path-bearing name and would leave the guard untested.
+        entries = [e._replace(size_bytes=catalog.head_length(e, opener)) for e in catalog.parse_catalog(body)]
+        fetch.fetch_disa(dest, opener=opener, entries=entries, sleep=lambda _seconds: None)
     assert not escaped.exists(), f"fetch_disa wrote {escaped}, outside the destination {dest}"
 
 
@@ -251,7 +260,7 @@ def test_fetch_disa__a_server_that_never_stops_resetting__is_asked_a_bounded_num
         requested.append(request.full_url)
         raise urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))
 
-    entries = _sized(catalog.parse_catalog(_catalog_body(catalog.ZIP_BASE + "U_Foo_V1R1_STIG.zip")))
+    entries = [catalog.Entry(name="U_Foo_V1R1_STIG.zip", href="U_Foo_V1R1_STIG.zip", date="2026-10-05", size_bytes=1)]
     with pytest.raises(urllib.error.URLError):
         fetch.fetch_disa(tmp_path, opener=always_resetting, entries=entries, sleep=paused.append)
     assert len(requested) == fetch.RETRY_ATTEMPTS

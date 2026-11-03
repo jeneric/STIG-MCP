@@ -16,7 +16,6 @@ from typing import NamedTuple
 from stig_mcp import tls
 from stig_mcp.ingest.fetch import require_bare_name, require_web_url
 
-INDEX_URL = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
 ZIP_BASE = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
 CATALOG_URL = "https://www.cyber.mil/webruntime/api/apex/execute?language=en-US&asGuest=true&htmlEncode=false"
 CATALOG_CLASSNAME = "@udd/01pRw0000002mOj"
@@ -24,13 +23,6 @@ CATALOG_METHOD = "getCyberDocumentCatalogByDocumentLibrary"
 CATALOG_LIBRARY = "STIGs"
 USER_AGENT = "stig-mcp"
 _TIMEOUT = 60
-
-# An Apache autoindex row: link, then the upload date, then a human size like 665k or 1.1M.
-_ROW = re.compile(
-    r'<A HREF="([^"]+)">[^<]*</A>\s+(\d{2}-\w{3}-\d{4})\s+\d{2}:\d{2}\s+([0-9.]+[KMGkmg]?)',
-    re.IGNORECASE,
-)
-_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3}
 
 
 class Entry(NamedTuple):
@@ -40,45 +32,7 @@ class Entry(NamedTuple):
     size_bytes: int | None
 
 
-def _bytes_of(size):
-    unit = size[-1].upper()
-    if unit in _UNITS:
-        return int(float(size[:-1]) * _UNITS[unit])
-    return int(float(size))
-
-
-def parse_index(text):
-    """Every file row on the index page. A page with no rows is empty, not an error; the
-    caller decides whether empty is a failure, because for the compilation tier it is.
-
-    Refuses the WHOLE page when a row names anything but a plain filename, the way tier_of
-    refuses CUI_ content, so that every Entry this module hands out carries a name safe to
-    join onto a directory. Every consumer does exactly that join (fetch.fetch_disa writes
-    there, fetch.prune unlinks there, tools/corpus_fetch stages there), so an HREF of
-    ../escape.zip would put a download outside the sources directory and, once a manifest
-    recorded it, authorize a delete outside it too.
-
-    Fail closed rather than dropping the offending row alone: an Apache autoindex publishes
-    bare filenames, and its directory rows carry "-" in the size column so they never match
-    _ROW at all, which makes a path-bearing row evidence that the page is not the one this
-    tool means to read rather than one entry to skip.
-
-    Guarding the unquoted NAME also covers the URL each href is joined to, and no separate
-    href guard is needed: unquoting can only introduce separators, never remove them, so an
-    href of %2e%2e%2fescape.zip or a whole https://elsewhere/x.zip unquotes to a name carrying
-    a separator and is refused here, before urljoin resolves it to another path or host.
-    require_web_url checks only the scheme and would pass both.
-    """
-    entries = [
-        Entry(name=urllib.parse.unquote(href), href=href, date=date, size_bytes=_bytes_of(size))
-        for href, date, size in _ROW.findall(text)
-    ]
-    for entry in entries:
-        require_bare_name(entry.name)
-    return entries
-
-
-def _shape_error(detail):
+def catalog_call_error(detail):
     return RuntimeError(
         f"The cyber.mil catalog response {detail}. The Apex class id changes when DISA redeploys "
         f"it: find the current {CATALOG_CLASSNAME!r} replacement in the getApexInvoker(...) line "
@@ -91,9 +45,9 @@ def _catalog_rows(text):
     try:
         rows = json.loads(text)["returnValue"]
     except (ValueError, KeyError, TypeError) as error:
-        raise _shape_error(f"is not JSON with a returnValue ({error!r})") from error
+        raise catalog_call_error(f"is not JSON with a returnValue ({error!r})") from error
     if not isinstance(rows, list):
-        raise _shape_error("has a returnValue that is not a list")
+        raise catalog_call_error("has a returnValue that is not a list")
     return rows
 
 
@@ -233,9 +187,10 @@ def newest_library(entries):
     candidates = [e for e in entries if tier_of(e.name) == COMPILATION and not SUNSET_RE.search(e.name)]
     if not candidates:
         raise ValueError(
-            f"Found no SRG-STIG Library compilation in the index at {INDEX_URL}. Either DISA "
-            f"changed how the directory listing is published, or the page did not load. "
-            f"Download the compilation by hand and place it in the sources directory."
+            f"Found no SRG-STIG Library compilation among the cyber.mil catalog's zips under "
+            f"{ZIP_BASE}. Either DISA stopped listing it in the STIGs document library, or "
+            f"the catalog response was cut short. Download the compilation by hand and place "
+            f"it in the sources directory."
         )
     winner = max(candidates, key=lambda e: library_order(e.name))
     if library_order(winner.name) == (0, 0):

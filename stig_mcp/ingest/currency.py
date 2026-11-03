@@ -4,9 +4,10 @@ built from. Used by stig-mcp-fetch --check and --refresh.
 A separate module from upstream because it reads the fetch manifest and DISA diff, and fetch
 itself imports upstream. Never raises: a source that cannot be checked reports why."""
 
+import time
 from pathlib import Path
 
-from stig_mcp.ingest import catalog, fetch, upstream
+from stig_mcp.ingest import fetch, upstream
 
 
 def _key_or_none(version):
@@ -52,7 +53,7 @@ def _catalog(sources_dir, record, built, with_built, opener):
 
 
 def _disa(manifest, built_library, with_built, opener):
-    entries = fetch.selection(catalog.parse_index(catalog.fetch_listing(catalog.INDEX_URL, opener=opener)))
+    entries = fetch.disa_selection(opener=opener, pause=time.sleep)
     changes = fetch.diff(entries, manifest)
     entry = {**changes, "action": "refresh" if changes["new"] or changes["resized"] else "none"}
     if with_built:

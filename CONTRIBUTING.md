@@ -33,7 +33,7 @@ supported workflow, is not run in CI, and is not wired to `stig-mcp-fetch`. Runn
 deliberate, occasional check, not something day-to-day development depends on.
 
 The published directory holds 1,032 file rows, measured on 2026-08-14 against
-`tests/fixtures/disa_index.html`, the saved copy of it this repository tests against: 613
+a saved copy of the directory listing (removed with the listing parser): 613
 benchmark-tier product zips, 10 compilations, 323 adversarial, 70 junk, and 16 rows that are
 not zips at all and are tiered out. Junk is the largest tier by volume at 5.78 GiB, and the
 nine STIG Viewer desktop application archives that land there are only 1.31 GiB of it: the
