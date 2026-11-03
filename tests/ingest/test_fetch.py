@@ -422,12 +422,13 @@ def test_manifest_name__is_ignored_by_the_ingest(tmp_path):
 
 
 def test_fetch_disa__a_file_still_the_length_the_manifest_recorded__is_not_downloaded_again(tmp_path):
-    # The advertised size (999) deliberately disagrees with the file's real length (5): a skip
-    # that compared against the advertised size instead of the manifest would never fire.
-    entries = [_entry("a.zip", size_bytes=999)]
+    # The manifest holds a stale display size (999, as a 0.2.0 manifest does) beside the real
+    # length (5); the HEAD now agrees with the real length. A skip that compared the stored
+    # size_bytes instead of on_disk_bytes would never fire.
     (tmp_path / "a.zip").write_bytes(b"12345")
-    fetch.write_manifest(tmp_path, entries)
+    fetch.write_manifest(tmp_path, [_entry("a.zip", size_bytes=999)])
     opener = _Opener({})
+    entries = [_entry("a.zip", size_bytes=5)]
     written = fetch.fetch_disa(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
     assert opener.requested == []
     assert written == [tmp_path / "a.zip"]
@@ -690,12 +691,13 @@ def test_fetch_disa__a_selection_already_fully_downloaded__is_not_refused_for_la
 
 
 def test_fetch_disa__room_for_the_remainder_but_not_the_whole_selection__downloads_the_remainder(tmp_path, monkeypatch):
-    # The preflight sizes what this run will fetch, not what the selection weighs: one 3 GiB
+    # The preflight sizes what this run will fetch, not what the selection weighs: one 8 KiB
     # entry already on disk must not make a 5 byte download impossible.
-    entries = [_entry("big.zip", size_bytes=3 * 1024**3), _entry("a.zip")]
-    (tmp_path / "big.zip").write_bytes(b"cached")
+    monkeypatch.setattr(fetch, "REQUIRED_FREE_BYTES", 1024)
+    entries = [_entry("big.zip", size_bytes=8192), _entry("a.zip")]
+    (tmp_path / "big.zip").write_bytes(b"x" * 8192)
     fetch.write_manifest(tmp_path, entries)
-    monkeypatch.setattr(fetch.shutil, "disk_usage", lambda _path: SimpleNamespace(total=0, used=0, free=3 * 1024**3))
+    monkeypatch.setattr(fetch.shutil, "disk_usage", lambda _path: SimpleNamespace(total=0, used=0, free=4096))
     opener = _Opener({_url("a.zip"): b"12345"})
     fetch.fetch_disa(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
     assert opener.requested == [_url("a.zip")]
@@ -989,8 +991,9 @@ def test_fetch_disa__the_cci_archive_downloaded__leaves_the_xml_and_reports_it(t
 def test_fetch_disa__the_archive_skipped_but_the_xml_gone__restores_it_without_a_request(tmp_path):
     # The second run of the two-command flow, with the XML deleted in between. The manifest
     # still matches the zip, so nothing is downloaded and only the extraction can restore it.
-    entries = [_entry("CCI_List.zip")]
-    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"CCI_List.xml": _CCI_XML}))
+    archive = _cci_zip({"CCI_List.xml": _CCI_XML})
+    entries = [_entry("CCI_List.zip", size_bytes=len(archive))]
+    (tmp_path / "CCI_List.zip").write_bytes(archive)
     fetch.write_manifest(tmp_path, entries)
     opener = _Opener({})
     fetch.fetch_disa(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
@@ -1012,8 +1015,8 @@ def test_fetch_disa__a_download_failing_after_the_cci_archive_arrived__extracts_
     # The extraction runs only after every download has succeeded, so a run that raises leaves
     # no XML however far it got. Nothing is lost by that: the retry skips the archive on the
     # manifest and extracts from it. Pinned because the docstring rules on it.
-    entries = [_entry("CCI_List.zip"), _entry("b.zip")]
     archive = _cci_zip({"CCI_List.xml": _CCI_XML})
+    entries = [_entry("CCI_List.zip", size_bytes=len(archive)), _entry("b.zip")]
     failing = _Opener({_url("CCI_List.zip"): archive, _url("b.zip"): OSError("connection reset")})
     with pytest.raises(OSError, match="connection reset"):
         fetch.fetch_disa(tmp_path, opener=failing, entries=entries, sleep=lambda _seconds: None)

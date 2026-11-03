@@ -462,7 +462,7 @@ def _digest(path):
     return digest.hexdigest()
 
 
-def _already_downloaded(target, recorded):
+def _already_downloaded(target, recorded, advertised=None):
     """True when the file this manifest entry recorded is still on disk at that length.
 
     Compares against on_disk_bytes and NEVER against size_bytes. size_bytes is the length the
@@ -472,9 +472,15 @@ def _already_downloaded(target, recorded):
 
     A file present at some other length is a truncated or superseded download and must be
     taken again, and so is a file recorded while it was absent (on_disk_bytes is None).
+
+    advertised is the length the server's HEAD reports now. A same-name file whose HEAD differs
+    from the stored length was reissued and is taken again. prune passes nothing: it runs
+    against the manifest fetch_disa just wrote.
     """
     stored = recorded.get("on_disk_bytes")
-    return stored is not None and target.is_file() and target.stat().st_size == stored
+    if stored is None or (advertised is not None and advertised != stored):
+        return False
+    return target.is_file() and target.stat().st_size == stored
 
 
 def _refuse_cui_url(url):
@@ -639,7 +645,7 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
         require_web_url(url)
         target = dest_dir / entry.name
         written.append(target)
-        if _already_downloaded(target, recorded.get(entry.name, {})):
+        if _already_downloaded(target, recorded.get(entry.name, {}), entry.size_bytes):
             vouched_for.add(entry.name)
         else:
             pending.append((entry, url, target))

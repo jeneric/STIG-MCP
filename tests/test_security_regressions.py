@@ -247,6 +247,23 @@ def test_fetch_disa__a_catalog_row_that_leaves_the_destination__writes_nothing_o
     assert not escaped.exists(), f"fetch_disa wrote {escaped}, outside the destination {dest}"
 
 
+def test_fetch_disa__same_name_reissued_at_a_new_length__downloads_it_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(fetch.shutil, "disk_usage", lambda _path: _PLENTY_OF_DISK)
+    name = "U_Foo_V1R1_STIG.zip"
+    (tmp_path / name).write_bytes(b"old")
+    fetch.write_manifest(tmp_path, [catalog.Entry(name=name, href=name, date="10-Jul-2026", size_bytes=3)])
+    reissued = [catalog.Entry(name=name, href=name, date="10-Aug-2026", size_bytes=7)]
+    requested = []
+
+    def open_url(request, timeout=None):
+        requested.append(request.get_method())
+        return io.BytesIO(b"new rel")
+
+    fetch.fetch_disa(tmp_path, opener=open_url, entries=reissued, sleep=lambda _seconds: None)
+    assert (tmp_path / name).read_bytes() == b"new rel"
+    assert requested == ["GET"]
+
+
 def test_fetch_disa__a_server_that_never_stops_resetting__is_asked_a_bounded_number_of_times(tmp_path, monkeypatch):
     """A hostile or merely broken host that resets every connection must not hold fetch_disa in
     an unbounded retry loop: fetch._with_retry stops after fetch.RETRY_ATTEMPTS tries and the
