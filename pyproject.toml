@@ -1,6 +1,6 @@
 [project]
 name = "stig-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server: MITRE ATT&CK® -> NIST 800-53r5 -> DISA STIG fix/check steps, mitigations and detections"
 readme = "README.md"
 requires-python = ">=3.11"
