@@ -327,6 +327,18 @@
   {
    "Classification": "Unclassified",
    "DocumentLibrary": "STIGs",
+   "DownloadLink": "https://dl.dod.cyber.mil//wp-content/uploads/stigs/zip/U_Omnissa_Horizon_Y26M09_STIG.zip",
+   "DownloadType": "Virtualization",
+   "FileName": "Omnissa Horizon STIG",
+   "Name": "File-2032",
+   "RawDocumentLibrary": "STIGs",
+   "RawDownloadType": "Virtualization",
+   "Topic": "Security Technical Implementation Guides (STIG)",
+   "UploadDate": "2026-10-15"
+  },
+  {
+   "Classification": "Unclassified",
+   "DocumentLibrary": "STIGs",
    "DownloadLink": "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/CCI_List.zip",
    "DownloadType": "STIGs, Control Correlation Identifier (CCI)",
    "FileName": "CCI List",

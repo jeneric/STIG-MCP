@@ -581,16 +581,78 @@ def test_disa_selection__a_head_that_resets_once__retries_it():
     assert pauses == [fetch.RETRY_BACKOFF[0]]
 
 
-def test_disa_selection__a_head_answering_404__raises_it():
+def test_disa_selection__a_head_answering_404__raises_naming_the_file_and_url():
     # Decision 10: a HEAD failure fails the selection; an unsized entry must never reach diff.
     bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
     missing = urllib.error.HTTPError(_url("U_Foo_V1R1_STIG.zip"), 404, "Not Found", {}, None)
     bodies[_head_key("U_Foo_V1R1_STIG.zip")] = missing
     pauses = []
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
+    with pytest.raises(RuntimeError) as excinfo:
         fetch.disa_selection(opener=_Opener(bodies), pause=pauses.append)
-    assert excinfo.value is missing
+    message = str(excinfo.value)
+    assert excinfo.value.__cause__ is missing
+    assert f"HEAD {_url('U_Foo_V1R1_STIG.zip')} for U_Foo_V1R1_STIG.zip" in message
+    assert "HTTP Error 404" in message
+    assert "no longer serves" in message
     assert pauses == []
+
+
+def test_disa_selection__a_head_answering_403__says_refused_not_withdrawn():
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    forbidden = urllib.error.HTTPError(_url("U_Foo_V1R1_STIG.zip"), 403, "Forbidden", {}, None)
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = forbidden
+    with pytest.raises(RuntimeError) as excinfo:
+        fetch.disa_selection(opener=_Opener(bodies), pause=lambda _seconds: None)
+    message = str(excinfo.value)
+    assert excinfo.value.__cause__ is forbidden
+    assert f"HEAD {_url('U_Foo_V1R1_STIG.zip')} for U_Foo_V1R1_STIG.zip" in message
+    assert "refused the request with HTTP 403" in message
+    assert "no longer serves" not in message
+
+
+def test_disa_selection__a_head_that_resets_every_time__raises_naming_the_file_after_the_retries():
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    resets = [urllib.error.URLError(ConnectionResetError(104, "reset")) for _ in range(fetch.RETRY_ATTEMPTS)]
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = list(resets)  # the opener consumes its list
+    pauses = []
+    with pytest.raises(RuntimeError) as excinfo:
+        fetch.disa_selection(opener=_Opener(bodies), pause=pauses.append)
+    message = str(excinfo.value)
+    assert excinfo.value.__cause__ is resets[-1]
+    assert f"HEAD {_url('U_Foo_V1R1_STIG.zip')} for U_Foo_V1R1_STIG.zip" in message
+    assert "run the command again" in message
+    assert "no longer serves" not in message
+    assert pauses == list(fetch.RETRY_BACKOFF)
+
+
+def test_disa_selection__a_head_failing_certificate_verification__blames_the_path_not_the_catalog():
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    untrusted = urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = untrusted
+    pauses = []
+    with pytest.raises(RuntimeError) as excinfo:
+        fetch.disa_selection(opener=_Opener(bodies), pause=pauses.append)
+    message = str(excinfo.value)
+    assert excinfo.value.__cause__ is untrusted
+    assert "U_Foo_V1R1_STIG.zip" in message
+    assert "TLS setup" in message
+    assert "no longer serves" not in message
+    assert pauses == []
+
+
+def test_run_check__a_head_answering_404__reports_disa_unknown_naming_the_file_and_url(tmp_path, capsys):
+    fetch.fetch_public(tmp_path, opener=_Opener(_public_bodies()))
+    _fetched(tmp_path, *_selected("U_Foo_V1R1_STIG.zip"))
+    bodies = _disa_bodies("U_Foo_V1R1_STIG.zip")
+    bodies[_head_key("U_Foo_V1R1_STIG.zip")] = urllib.error.HTTPError(
+        _url("U_Foo_V1R1_STIG.zip"), 404, "Not Found", {}, None
+    )
+    code = fetch._run_check(tmp_path, opener=_Opener({**_public_bodies(), **bodies}))
+    lines = capsys.readouterr().out.splitlines()
+    assert code == fetch.EXIT_COULD_NOT_CHECK
+    (line,) = [line for line in lines if line.startswith("  DISA: unknown (")]
+    assert "U_Foo_V1R1_STIG.zip" in line
+    assert _url("U_Foo_V1R1_STIG.zip") in line
 
 
 def test_run_check__a_head_that_fails__reports_disa_unknown_and_returns_could_not_check(tmp_path, capsys):
@@ -1641,17 +1703,27 @@ def _drop_scenario(tmp_path, recorded, listed):
     return _Opener(_disa_bodies(*names[: listed - 1])), [_LIBRARY, *names]
 
 
-def test_run_refresh__drop_withdrawn_over_a_quarter__refuses_before_downloading(tmp_path):
+def test_run_refresh__drop_withdrawn_over_a_quarter__refuses_before_any_disa_download(tmp_path):
     opener, recorded = _drop_scenario(tmp_path, 8, 5)
     with pytest.raises(RuntimeError) as refusal:
         fetch._run_refresh(tmp_path, 0, opener=opener, drop_withdrawn=True)
     message = str(refusal.value)
     assert "lists 5 of the 8 files the last fetch recorded" in message
-    assert "would delete 3 (38%), over the 25% limit" in message
+    assert "would delete 3 (37.5%), over the 25% limit" in message
     assert "cut short" in message
     assert "without --drop-withdrawn" in message
     assert not [u for u in _disa_requests(opener) if not u.startswith(("POST", "HEAD"))]
     assert all((tmp_path / name).exists() for name in recorded)
+
+
+def test_refuse_mass_drop__just_over_a_quarter__prints_a_fraction_over_the_limit():
+    # 66 of 263 is 25.1%, which a whole-percent format rounds to "25%, over the 25% limit".
+    recorded = _products(263)
+    manifest = {"entries": {name: {} for name in recorded}}
+    listed = [catalog.Entry(name=name, href=name, date="", size_bytes=1) for name in recorded[:197]]
+    with pytest.raises(RuntimeError) as refusal:
+        fetch._refuse_mass_drop(listed, manifest)
+    assert "would delete 66 (25.1%), over the 25% limit" in str(refusal.value)
 
 
 def test_run_refresh__drop_withdrawn_at_a_quarter__proceeds(tmp_path, capsys):

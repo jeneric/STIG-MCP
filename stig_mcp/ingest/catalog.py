@@ -8,6 +8,7 @@ The network calls are fetch_catalog, head_length and fetch_listing.
 """
 
 import json
+import logging
 import re
 import urllib.parse
 import urllib.request
@@ -17,12 +18,16 @@ from stig_mcp import tls
 from stig_mcp.ingest.fetch import require_bare_name, require_web_url
 
 ZIP_BASE = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
+# The path DISA's zips sit under on ZIP_BASE's host and on the S3 bucket mirroring it.
+_ZIP_PATH = "/wp-content/uploads/stigs/zip/"
 CATALOG_URL = "https://www.cyber.mil/webruntime/api/apex/execute?language=en-US&asGuest=true&htmlEncode=false"
 CATALOG_CLASSNAME = "@udd/01pRw0000002mOj"
 CATALOG_METHOD = "getCyberDocumentCatalogByDocumentLibrary"
 CATALOG_LIBRARY = "STIGs"
 USER_AGENT = "stig-mcp"
 _TIMEOUT = 60
+
+logger = logging.getLogger(__name__)
 
 
 class Entry(NamedTuple):
@@ -51,8 +56,53 @@ def _catalog_rows(text):
     return rows
 
 
+def _zip_name(link):
+    """The still-quoted filename a link names on the zip path, or None when it is elsewhere.
+
+    Repeated slashes in the path are collapsed first, since DISA publishes some links as
+    dl.dod.cyber.mil//wp-content/.... A link under ZIP_BASE yields what follows it. A link on
+    any other host yields what follows the zip path in it, which is how DISA links a file
+    through its S3 mirror; only that name is kept, never the host. Everything after the prefix
+    is returned whole, separators included, so require_bare_name sees a ../ step rather than
+    a basename that hid it.
+    """
+    parts = urllib.parse.urlsplit(link)
+    path = re.sub(r"/{2,}", "/", parts.path)
+    collapsed = urllib.parse.urlunsplit(parts._replace(path=path))
+    if collapsed.startswith(ZIP_BASE):
+        return collapsed[len(ZIP_BASE) :]
+    marker = path.find(_ZIP_PATH)
+    if marker < 0:
+        return None
+    host_part = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    return collapsed[len(host_part) + marker + len(_ZIP_PATH) :]
+
+
+def _entry_of(row, off_path):
+    """The Entry a catalog row's zip link names, or None. A .zip link off the zip path is
+    appended to off_path, so that parse_catalog can name every one it skipped."""
+    link = row.get("DownloadLink") if isinstance(row, dict) else None
+    if not (isinstance(link, str) and link.lower().endswith(".zip")):
+        return None
+    quoted = _zip_name(link)
+    if quoted is None:
+        off_path.append(link)
+        return None
+    name = urllib.parse.unquote(quoted)
+    require_bare_name(name)
+    date = row.get("UploadDate")
+    # DISA publishes some links with a raw space, which http.client refuses to send.
+    return Entry(name=name, href=urllib.parse.quote(name), date=date if isinstance(date, str) else "", size_bytes=None)
+
+
 def parse_catalog(text):
-    """Every zip DISA publishes under ZIP_BASE, sorted by name, one Entry per name.
+    """Every zip DISA publishes on its zip path, sorted by name, one Entry per name.
+
+    A row counts when its link, after repeated slashes collapse, is under ZIP_BASE, or is on
+    another host with a path ending in the zip path and a filename (the S3 mirror). Only the
+    filename is kept: head_length and fetch_disa request ZIP_BASE + href, so no link ever
+    sends a request to the host it names. Any other .zip link is skipped and named in one
+    warning, so a new mirror DISA starts linking is visible rather than a silent loss.
 
     Refuses the WHOLE response when a link names anything but a plain filename, so that every
     Entry this module hands out carries a name safe to join onto a directory. Every consumer
@@ -65,29 +115,33 @@ def parse_catalog(text):
     Guarding the unquoted NAME also covers the URL each href is joined to: unquoting can only
     introduce separators, never remove them, so %2e%2e%2fescape.zip unquotes to a name
     carrying a separator and is refused here, before urljoin resolves it to another path.
-    Links on any other host never start with ZIP_BASE and are ignored, not followed.
 
     The catalog lists a file twice when DISA files it under two titles; the name is the
     identity, so the row with the newest UploadDate stands in for both.
     """
     newest = {}
+    off_path = []
     rows = _catalog_rows(text)
     for row in rows:
-        link = row.get("DownloadLink", "") if isinstance(row, dict) else ""
-        if not (link.startswith(ZIP_BASE) and link.lower().endswith(".zip")):
+        entry = _entry_of(row, off_path)
+        if entry is None:
             continue
-        name = urllib.parse.unquote(link[len(ZIP_BASE) :])
-        require_bare_name(name)
-        # DISA publishes some links with a raw space, which http.client refuses to send.
-        href = urllib.parse.quote(name)
-        entry = Entry(name=name, href=href, date=str(row.get("UploadDate", "")), size_bytes=None)
-        incumbent = newest.get(name)
+        incumbent = newest.get(entry.name)
         if incumbent is None or entry.date > incumbent.date:
-            newest[name] = entry
+            newest[entry.name] = entry
+    if off_path:
+        logger.warning(
+            "Skipped %d .zip link(s) in the cyber.mil catalog that are not on %s or a mirror of "
+            "that path, so nothing from them is fetched: %s",
+            len(off_path),
+            ZIP_BASE,
+            ", ".join(off_path),
+        )
     if not newest:
         raise RuntimeError(
             f"The cyber.mil catalog call succeeded and returned {len(rows)} rows, but none has a "
-            f"DownloadLink under {ZIP_BASE} ending in .zip (no zip rows). DISA has changed the "
+            f"DownloadLink under {ZIP_BASE} (or that path on a mirror) ending in .zip (no zip rows). "
+            f"DISA has changed the "
             f"catalog's row shape or download location: compare a row of the live response with "
             f"DownloadLink and ZIP_BASE in stig_mcp/ingest/catalog.py."
         )

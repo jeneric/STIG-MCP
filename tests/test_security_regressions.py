@@ -189,6 +189,9 @@ def test_require_bare_name__a_name_the_real_index_publishes__is_accepted(name):
     fetch.require_bare_name(name)  # no exception
 
 
+_MIRROR_ZIP_PATH = "https://s3.us-gov-west-1.amazonaws.com/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
+
+
 def _catalog_body(link):
     return json.dumps({"returnValue": [{"DownloadLink": link, "UploadDate": "2026-10-05", "FileName": "x"}]})
 
@@ -199,17 +202,20 @@ def _catalog_body(link):
         catalog.ZIP_BASE + "../escape.zip",
         catalog.ZIP_BASE + "%2e%2e%2fescape.zip",
         catalog.ZIP_BASE + "sub/x.zip",
+        _MIRROR_ZIP_PATH + "../escape.zip",
+        _MIRROR_ZIP_PATH + "%2e%2e%2fescape.zip",
+        _MIRROR_ZIP_PATH + "..%5cescape.zip",
     ],
 )
-def test_parse_catalog__a_link_under_zip_base_that_leaves_it__refuses_the_response(link):
+def test_parse_catalog__a_link_on_the_zip_path_that_leaves_it__refuses_the_response(link):
     # The name is unquoted before the guard sees it, so an encoded separator cannot slip past
     # the way it would past a check on the raw href.
     with pytest.raises(ValueError, match="plain filename"):
         catalog.parse_catalog(_catalog_body(link))
 
 
-def test_parse_catalog__a_zip_on_another_host__is_ignored():
-    evil = "https://evil.example/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip"
+def test_parse_catalog__a_zip_on_another_host_off_the_zip_path__is_ignored():
+    evil = "https://evil.example/payloads/U_Foo_V1R1_STIG.zip"
     good = catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip"
     body = json.dumps(
         {
@@ -220,6 +226,22 @@ def test_parse_catalog__a_zip_on_another_host__is_ignored():
         }
     )
     assert [e.name for e in catalog.parse_catalog(body)] == ["U_Bar_V1R1_STIG.zip"]
+
+
+def test_head_length__a_mirror_host_entry__never_requests_the_mirror_host():
+    entry, *_ = catalog.parse_catalog(
+        _catalog_body("https://evil.example/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip")
+    )
+    seen = []
+
+    def open_url(request, timeout=None):
+        seen.append(request.full_url)
+        response = io.BytesIO(b"")
+        response.headers = {"Content-Length": "1"}
+        return response
+
+    catalog.head_length(entry, open_url)
+    assert seen == [catalog.ZIP_BASE + "U_Foo_V1R1_STIG.zip"]
 
 
 def test_fetch_disa__a_catalog_row_that_leaves_the_destination__writes_nothing_outside_it(tmp_path, monkeypatch):

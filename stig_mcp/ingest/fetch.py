@@ -324,10 +324,44 @@ def disa_selection(opener=None, pause=None):
 
 
 def _sized(entry, open_url, pause):
+    """entry with size_bytes from its HEAD, or a RuntimeError naming the file and the URL.
+
+    Wraps only after _with_retry has given up, so transient failures are still retried on the
+    raw exception is_transient classifies. OSError covers URLError, HTTPError, TimeoutError and
+    ConnectionError.
+    """
     from stig_mcp.ingest import catalog  # noqa: PLC0415 (local to avoid a cycle, as in selection)
 
-    length = _with_retry(functools.partial(catalog.head_length, entry, open_url), entry.name, pause)
+    try:
+        length = _with_retry(functools.partial(catalog.head_length, entry, open_url), entry.name, pause)
+    except (OSError, http.client.HTTPException) as exc:
+        url = urllib.parse.urljoin(catalog.ZIP_BASE, entry.href)
+        raise RuntimeError(
+            f"HEAD {url} for {entry.name}, which the cyber.mil catalog lists, failed: {exc}. {_head_advice(exc)}"
+        ) from exc
     return entry._replace(size_bytes=length)
+
+
+_GONE_HTTP_CODES = frozenset({404, 410})
+_ZIP_HOST = "dl.dod.cyber.mil"
+
+
+def _head_advice(exc):
+    if is_transient(exc):
+        return "The failure is transient and outlasted every retry: run the command again later."
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in _GONE_HTTP_CODES:
+        return (
+            "DISA's catalog lists a file its download host no longer serves: run the command "
+            "again once DISA corrects the catalog or restores the file, and until then the "
+            "rest of the selection cannot be checked or fetched either."
+        )
+    if isinstance(exc, urllib.error.HTTPError):
+        return (
+            f"The download host refused the request with HTTP {exc.code}: check that this "
+            f"machine can reach {_ZIP_HOST} and that DISA is not blocking it, then run the "
+            f"command again."
+        )
+    return "The request did not reach the download host: check the network path and TLS setup to it."
 
 
 def preflight(dest_dir, entries, disk_usage=None):
@@ -608,8 +642,9 @@ def extract_cci(dest_dir):
 def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
     """Download the selected DISA artifacts into dest_dir and write the manifest.
 
-    Roughly a gigabyte from one government host, so requests are spaced by delay seconds;
-    entries already on disk at their recorded length are skipped and make no request at all.
+    Roughly a gigabyte from one government host, so downloads are spaced by delay seconds; the
+    HEADs that size the selection are not. Entries already on disk at their recorded length
+    are skipped and make no request at all.
     Pass entries to fetch a subset, otherwise disa_selection reads the catalog once and sizes
     what selection takes.
 
@@ -801,7 +836,7 @@ def would_drop(entries, manifest):
 
 
 def _refuse_mass_drop(entries, manifest):
-    """Raise before any download when --drop-withdrawn would delete over MAX_DROP_FRACTION.
+    """Raise before any DISA download when --drop-withdrawn would delete over MAX_DROP_FRACTION.
 
     A truncated catalog response lists a fraction of the products, and dropping what it omits
     would delete most of the corpus. No manifest, or an empty one, is a first fetch: nothing
@@ -814,7 +849,7 @@ def _refuse_mass_drop(entries, manifest):
     listed = len(set(manifest["entries"]) & {e.name for e in entries})
     raise RuntimeError(
         f"The DISA catalog lists {listed} of the {recorded} files the last fetch recorded, "
-        f"so --drop-withdrawn would delete {len(dropping)} ({len(dropping) / recorded:.0%}), "
+        f"so --drop-withdrawn would delete {len(dropping)} ({len(dropping) / recorded:.1%}), "
         f"over the {MAX_DROP_FRACTION:.0%} limit. The catalog response may be cut short: rerun "
         "once it is whole, or run stig-mcp-fetch --refresh without --drop-withdrawn to refresh "
         "while keeping every file."

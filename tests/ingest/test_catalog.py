@@ -13,12 +13,14 @@ FIX = Path(__file__).parent.parent / "fixtures"
 # Chef variant, CCI_List.zip and both compilations left out.
 EXPECTED_SELECTION = {
     "U_Anduril_NixOS_V1R3_STIG.zip",
+    "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip",
     "U_Apache_Server_2-4_Unix_Y26M07_STIG.zip",
     "U_Cisco_IOS_Router_Y26M10_STIG.zip",
     "U_Google_Android_14_BYOAD_Y25M10_STIG.zip",
     "U_IBM_HMC_V2R2_STIG.zip",
     "U_MS_IIS_10-0_Y26M10_STIG.zip",
     "U_MS_Windows_Server_2019_V3R9_STIG.zip",
+    "U_Omnissa_Horizon_Y26M09_STIG.zip",
     "U_RHEL_10_V1R3_STIG.zip",
     "U_RHEL_7_V3R15_STIG.zip",
     "U_RHEL_9_V2R10_STIG.zip",
@@ -35,16 +37,17 @@ def _body(*rows):
     return json.dumps({"returnValue": list(rows)})
 
 
-def test_parse_catalog__the_saved_response__keeps_only_zip_rows_under_zip_base():
+def test_parse_catalog__the_saved_response__keeps_every_zip_row_on_the_zip_path():
     entries = catalog.parse_catalog(CATALOG)
     names = {e.name for e in entries}
     assert all("/" not in e.href for e in entries)
     assert all(e.size_bytes is None for e in entries)
     assert {"CCI_List.zip", "U_SRG-STIG_Library_October_2026.zip", "U_Rev_4_SRG-STIG_Sunset_Compilation.zip"} <= names
-    assert "u_draft_cci_specification_v2r0.2.zip" not in names  # dl.cyber.mil, not dl.dod.cyber.mil
-    assert "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip" not in names  # the S3 mirror host
+    assert "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip" in names  # the S3 mirror host
+    assert "U_Omnissa_Horizon_Y26M09_STIG.zip" in names  # a doubled slash after the host
+    assert "u_draft_cci_specification_v2r0.2.zip" in names  # dl.cyber.mil, on the same zip path
     assert not any(name.lower().endswith((".pdf", ".txt")) for name in names)
-    assert len(entries) == 24
+    assert len(entries) == 27
 
 
 def test_parse_catalog__the_saved_response__is_sorted_by_name():
@@ -93,6 +96,68 @@ def test_parse_catalog__the_same_name_listed_twice__keeps_the_newest_upload_date
 def test_parse_catalog__body_without_return_value__names_the_classname(body):
     with pytest.raises(RuntimeError, match=re.escape(catalog.CATALOG_CLASSNAME)):
         catalog.parse_catalog(body)
+
+
+def test_parse_catalog__a_doubled_slash_in_the_path__is_kept_under_zip_base():
+    link = "https://dl.dod.cyber.mil//wp-content/uploads//stigs/zip/U_Foo_V1R1_STIG.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert (entry.name, entry.href) == ("U_Foo_V1R1_STIG.zip", "U_Foo_V1R1_STIG.zip")
+
+
+def test_parse_catalog__a_mirror_host_on_the_zip_path__keeps_the_name_only():
+    link = "https://s3.us-gov-west-1.amazonaws.com/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_Foo V1R1_STIG.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert (entry.name, entry.href) == ("U_Foo V1R1_STIG.zip", "U_Foo%20V1R1_STIG.zip")
+
+
+def test_parse_catalog__a_zip_off_the_zip_path__is_skipped_and_named_in_one_warning(caplog):
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    elsewhere = _row("https://files.example/downloads/U_Foo_V1R1_STIG.zip")
+    other = _row("https://dl.dod.cyber.mil/wp-content/uploads/stigs/pdf/U_Baz_V1R1_STIG.ZIP")
+    pdf = _row("https://dl.dod.cyber.mil/wp-content/uploads/stigs/pdf/U_Qux.pdf")
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        entries = catalog.parse_catalog(_body(good, elsewhere, other, pdf))
+    assert [e.name for e in entries] == ["U_Bar_V1R1_STIG.zip"]
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert elsewhere["DownloadLink"] in record.getMessage()
+    assert other["DownloadLink"] in record.getMessage()
+    assert "U_Qux.pdf" not in record.getMessage()
+
+
+def test_parse_catalog__the_zip_path_only_in_the_query__is_skipped_and_named(caplog):
+    link = "https://files.example/a.zip?u=/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip"
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        entries = catalog.parse_catalog(_body(_row(link), good))
+    assert [e.name for e in entries] == ["U_Bar_V1R1_STIG.zip"]
+    (record,) = caplog.records
+    assert link in record.getMessage()
+
+
+def test_parse_catalog__a_mirror_link_with_a_query__keeps_it_in_the_name_and_escapes_it():
+    link = "https://s3.example/dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip?x=1#y.zip"
+    (entry,) = catalog.parse_catalog(_body(_row(link)))
+    assert entry.name == "U_Foo_V1R1_STIG.zip?x=1#y.zip"
+    assert entry.href == "U_Foo_V1R1_STIG.zip%3Fx%3D1%23y.zip"
+
+
+def test_parse_catalog__every_zip_on_the_zip_path__warns_nothing(caplog):
+    with caplog.at_level("WARNING", logger=catalog.__name__):
+        catalog.parse_catalog(_body(_row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")))
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize("link", [None, 42, ["x.zip"]])
+def test_parse_catalog__a_download_link_that_is_not_a_string__skips_the_row(link):
+    good = _row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip")
+    assert [e.name for e in catalog.parse_catalog(_body(_row(link), good))] == ["U_Bar_V1R1_STIG.zip"]
+
+
+@pytest.mark.parametrize("date", [None, 20261005])
+def test_parse_catalog__an_upload_date_that_is_not_a_string__becomes_empty(date):
+    (entry,) = catalog.parse_catalog(_body(_row(catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip", date=date)))
+    assert entry.date == ""
 
 
 def test_parse_catalog__no_zip_rows__blames_the_row_shape_not_the_classname():
@@ -167,6 +232,13 @@ def test_head_length__content_length_present__returns_it():
     assert request.get_method() == "HEAD"
     assert request.full_url == catalog.ZIP_BASE + "U_RHEL_9_V2R10_STIG.zip"
     assert request.get_header("User-agent") == "stig-mcp"
+
+
+def test_head_length__an_entry_from_the_mirror_host__requests_zip_base():
+    seen = []
+    by_name = {e.name: e for e in catalog.parse_catalog(CATALOG)}
+    catalog.head_length(by_name["U_Apple_iOS-iPadOS_17_V2R2_STIG.zip"], _head_opener({"Content-Length": "1"}, seen))
+    assert seen[0].full_url == catalog.ZIP_BASE + "U_Apple_iOS-iPadOS_17_V2R2_STIG.zip"
 
 
 def test_head_length__a_name_with_a_space__requests_the_quoted_url():

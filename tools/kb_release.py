@@ -113,19 +113,19 @@ def notes(doc, previous, previous_tag, tag):
     lines += ["## Upstream", *(f"- {k}: {v}" for k, v in sorted(doc["upstream"].items())), ""]
     lines += [
         "## Freshness tripwire",
-        "Passed: every benchmark on DISA's index is held at its newest release within the same major.",
+        "Passed: every benchmark in DISA's catalog is held at its newest release within the same major.",
     ]
     lines += ["", "## SHA-256", f"- xz: {doc['sha256']['xz']}", f"- sqlite: {doc['sha256']['sqlite']}", ""]
     return "\n".join(lines)
 
 
 def tripwire_summary(wire):
-    """The tripwire's notes for the maintainer: index names it could not match to a stored
+    """The tripwire's notes for the maintainer: catalog names it could not match to a stored
     benchmark by name. Neither fails the build, and neither tells a user what changed."""
     lines = ["## Freshness tripwire notes", ""]
     for heading, names in (
-        ("Newer major on the index, library major kept", wire["other_major"]),
-        ("On the index under a name no stored benchmark came from (usually an older name)", wire["unmatched"]),
+        ("Newer major in the catalog, library major kept", wire["other_major"]),
+        ("In the catalog under a name no stored benchmark came from (usually an older name)", wire["unmatched"]),
     ):
         lines += [f"### {heading} ({len(names)})", *([f"- `{name}`" for name in names] or ["- none"]), ""]
     return "\n".join(lines)

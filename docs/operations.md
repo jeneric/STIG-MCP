@@ -148,7 +148,10 @@ The second comes from one read of DISA's STIGs document catalog on `www.cyber.mi
 its Apex endpoint, the same call the STIGs downloads page makes), from which it selects the
 current SRG-STIG Library Compilation, the Rev 4 sunset compilation, the CCI list, and the
 newest loose STIG zip of each product. The zips themselves come from
-<https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/>. The catalog gives names and upload
+<https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/> (`ZIP_BASE`). A few catalog rows link
+a zip through DISA's S3 mirror, or with a doubled slash in the path; the fetch keeps only the
+filename from such a row and asks `ZIP_BASE` for it, never the mirror. A `.zip` link on neither
+path is skipped and named in one warning on standard error. The catalog gives names and upload
 dates but no sizes, so the fetch sends one HEAD request per selected file and takes its
 `Content-Length` as the exact length. Measured against DISA's former directory listing on 2026-08-14,
 that is 272 files and about 0.95 GiB; both figures drift as DISA publishes, so treat them as a
@@ -197,7 +200,7 @@ from GitHub before it ever reaches DISA.
 
 #### If the catalog read fails
 
-Two errors name a change on DISA's side, and each says what to compare.
+Three errors name a change on DISA's side, and each says what to compare.
 
 - **"The Apex class id changes when DISA redeploys it".** The catalog call is addressed to
   an Apex class by record id, and DISA changes that id when it redeploys the page. Update
@@ -206,9 +209,16 @@ Two errors name a change on DISA's side, and each says what to compare.
   `sTIGs_Document_Library_view` view bundle in the browser's developer tools, and read the
   `getApexInvoker(...)` line for `getCyberDocumentCatalogByDocumentLibrary`: the class id is
   its first argument, in the form `@udd/01p...`.
-- **"no zip rows".** The call worked, but no row has a `DownloadLink` under `ZIP_BASE`
-  ending in `.zip`. The row shape or the download location changed, not the class id: compare
+- **"no zip rows".** The call worked, but no row has a `DownloadLink` under `ZIP_BASE`, or
+  under that path on a mirror, ending in `.zip`. The row shape or the download location changed, not the class id: compare
   a row of the live response with `DownloadLink` and `ZIP_BASE` in the same file.
+- **"HEAD ... which the cyber.mil catalog lists, failed".** The catalog lists a file, but the
+  HEAD request sizing it failed. The message names the file and the URL asked, which is always
+  under `ZIP_BASE`. A 404 or 410 means the catalog lists a file the download host no longer
+  serves; `--check`, `--refresh` and the weekly release all stop on it until DISA corrects the
+  catalog or restores the file. Another HTTP status, such as 403, means the host refused this
+  machine: check its access to `dl.dod.cyber.mil`. A transient failure says so after its
+  retries, and a rerun is the remedy.
 
 ### 2. Ingest
 
@@ -436,7 +446,7 @@ a usage error and exits 2. It also deletes every DISA file the manifest recorded
 catalog no longer carries and no arrival superseded, and names each one it dropped. The CCI list
 is the one exception, kept because the ingest cannot run without it, and a file the manifest
 never recorded, such as a zip you placed by hand, is never touched. It refuses, before any
-download, when the drop would delete more than 25% of the recorded files (`MAX_DROP_FRACTION`
+DISA download, when the drop would delete more than 25% of the recorded files (`MAX_DROP_FRACTION`
 in `stig_mcp/ingest/fetch.py`), because a catalog response cut short lists only part of the
 products and would otherwise delete most of the corpus. Rerun once the response is whole. The flag exists for
 building a release only from what DISA publishes now, which is how the release pipeline below
