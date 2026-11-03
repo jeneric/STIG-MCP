@@ -584,7 +584,7 @@ def fetch_disa(dest_dir, opener=None, delay=0.25, sleep=None, entries=None):
     dest_dir.mkdir(parents=True, exist_ok=True)
     pause = sleep or time.sleep
     if entries is None:
-        read = functools.partial(catalog.fetch_listing, opener=opener)
+        read = functools.partial(catalog.fetch_listing, catalog.INDEX_URL, opener=opener)
         entries = selection(catalog.parse_index(_with_retry(read, "the DISA index", pause)))
     recorded = read_manifest(dest_dir)["entries"]
     written = []
@@ -988,7 +988,7 @@ def _run_refresh(dest_dir, delay, opener=None, drop_withdrawn=False):
     from stig_mcp.ingest import catalog, currency  # noqa: PLC0415 (both import fetch, so a cycle at module level)
 
     taken = _refresh_public(dest_dir, currency.public_report(dest_dir, opener=opener), opener)
-    read = functools.partial(catalog.fetch_listing, opener=opener)
+    read = functools.partial(catalog.fetch_listing, catalog.INDEX_URL, opener=opener)
     entries = selection(catalog.parse_index(_with_retry(read, "the DISA index", time.sleep)))
     manifest = read_manifest(dest_dir)
     changes = diff(entries, manifest)

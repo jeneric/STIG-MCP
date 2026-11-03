@@ -1,11 +1,13 @@
-"""What DISA publishes right now, read from its directory index.
+"""What DISA publishes right now, read from the cyber.mil document catalog.
 
 Imports no database module and nothing that downloads archives. The only project imports,
 require_web_url and require_bare_name from fetch, are the shared URL and name guards, not a
 download path. Selection is decided here and downloading happens elsewhere, so this half is
-testable against a saved page with no network and no database, and build_kb stays offline.
+testable against a saved response with no network and no database, and build_kb stays offline.
+The network calls are fetch_catalog, head_length and fetch_listing.
 """
 
+import json
 import re
 import urllib.parse
 import urllib.request
@@ -15,6 +17,11 @@ from stig_mcp import tls
 from stig_mcp.ingest.fetch import require_bare_name, require_web_url
 
 INDEX_URL = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
+ZIP_BASE = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
+CATALOG_URL = "https://www.cyber.mil/webruntime/api/apex/execute?language=en-US&asGuest=true&htmlEncode=false"
+CATALOG_CLASSNAME = "@udd/01pRw0000002mOj"
+CATALOG_METHOD = "getCyberDocumentCatalogByDocumentLibrary"
+CATALOG_LIBRARY = "STIGs"
 USER_AGENT = "stig-mcp"
 _TIMEOUT = 60
 
@@ -30,7 +37,7 @@ class Entry(NamedTuple):
     name: str
     href: str
     date: str
-    size_bytes: int
+    size_bytes: int | None
 
 
 def _bytes_of(size):
@@ -69,6 +76,68 @@ def parse_index(text):
     for entry in entries:
         require_bare_name(entry.name)
     return entries
+
+
+def _shape_error(detail):
+    return RuntimeError(
+        f"The cyber.mil catalog response {detail}. The Apex class id changes when DISA redeploys "
+        f"it: find the current {CATALOG_CLASSNAME!r} replacement in the getApexInvoker(...) line "
+        f"for {CATALOG_METHOD} in the STIGs page's sTIGs_Document_Library_view bundle, and update "
+        f"CATALOG_CLASSNAME in stig_mcp/ingest/catalog.py."
+    )
+
+
+def _catalog_rows(text):
+    try:
+        rows = json.loads(text)["returnValue"]
+    except (ValueError, KeyError, TypeError) as error:
+        raise _shape_error(f"is not JSON with a returnValue ({error!r})") from error
+    if not isinstance(rows, list):
+        raise _shape_error("has a returnValue that is not a list")
+    return rows
+
+
+def parse_catalog(text):
+    """Every zip DISA publishes under ZIP_BASE, sorted by name, one Entry per name.
+
+    Refuses the WHOLE response when a link names anything but a plain filename, so that every
+    Entry this module hands out carries a name safe to join onto a directory. Every consumer
+    does exactly that join (fetch.fetch_disa writes there, fetch.prune unlinks there,
+    tools/corpus_fetch stages there), so a link of ZIP_BASE + "../escape.zip" would put a
+    download outside the sources directory and, once a manifest recorded it, authorize a
+    delete outside it too. The catalog is a list of curated rows, so a path-bearing link is
+    evidence that the response is not the one this tool means to read, not one row to skip.
+
+    Guarding the unquoted NAME also covers the URL each href is joined to: unquoting can only
+    introduce separators, never remove them, so %2e%2e%2fescape.zip unquotes to a name
+    carrying a separator and is refused here, before urljoin resolves it to another path.
+    Links on any other host never start with ZIP_BASE and are ignored, not followed.
+
+    The catalog lists a file twice when DISA files it under two titles; the name is the
+    identity, so the row with the newest UploadDate stands in for both.
+    """
+    newest = {}
+    rows = _catalog_rows(text)
+    for row in rows:
+        link = row.get("DownloadLink", "") if isinstance(row, dict) else ""
+        if not (link.startswith(ZIP_BASE) and link.lower().endswith(".zip")):
+            continue
+        name = urllib.parse.unquote(link[len(ZIP_BASE) :])
+        require_bare_name(name)
+        # DISA publishes some links with a raw space, which http.client refuses to send.
+        href = urllib.parse.quote(name)
+        entry = Entry(name=name, href=href, date=str(row.get("UploadDate", "")), size_bytes=None)
+        incumbent = newest.get(name)
+        if incumbent is None or entry.date > incumbent.date:
+            newest[name] = entry
+    if not newest:
+        raise RuntimeError(
+            f"The cyber.mil catalog call succeeded and returned {len(rows)} rows, but none has a "
+            f"DownloadLink under {ZIP_BASE} ending in .zip (no zip rows). DISA has changed the "
+            f"catalog's row shape or download location: compare a row of the live response with "
+            f"DownloadLink and ZIP_BASE in stig_mcp/ingest/catalog.py."
+        )
+    return sorted(newest.values(), key=lambda e: e.name)
 
 
 BENCHMARK = "benchmark"
@@ -251,8 +320,50 @@ def sunset(entries):
     return next((e for e in entries if SUNSET_RE.search(e.name)), None)
 
 
-def fetch_listing(url=INDEX_URL, opener=None, user_agent=USER_AGENT):
-    """The index page as text. The only network call in this module."""
+def _catalog_post_body():
+    return json.dumps(
+        {
+            "namespace": "",
+            "classname": CATALOG_CLASSNAME,
+            "method": CATALOG_METHOD,
+            "isContinuation": False,
+            "params": {"documentLibrary": CATALOG_LIBRARY},
+            "cacheable": False,
+        }
+    ).encode("utf-8")
+
+
+def fetch_catalog(opener=None, user_agent=USER_AGENT):
+    """The catalog response as text: one POST to the cyber.mil Apex endpoint."""
+    request = urllib.request.Request(  # noqa: S310  CATALOG_URL is a constant https URL
+        CATALOG_URL,
+        data=_catalog_post_body(),
+        headers={"User-Agent": user_agent, "Content-Type": "application/json"},
+        method="POST",
+    )
+    open_url = opener or tls.opener()
+    with open_url(request, timeout=_TIMEOUT) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def head_length(entry, open_url, user_agent=USER_AGENT):
+    """The Content-Length of one catalog entry's zip, from a HEAD request."""
+    url = urllib.parse.urljoin(ZIP_BASE, entry.href)
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent}, method="HEAD")  # noqa: S310  ZIP_BASE is a constant https URL and entry.href was guarded by parse_catalog
+    with open_url(request, timeout=_TIMEOUT) as response:
+        raw = response.headers.get("Content-Length")
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(
+            f"The server sent no usable Content-Length for {entry.name} ({raw!r}) in answer to "
+            f"a HEAD request to {url}. Size cannot be read from this file; check that the URL "
+            f"still serves it."
+        ) from error
+
+
+def fetch_listing(url, opener=None, user_agent=USER_AGENT):
+    """A page at url as text, for tools/corpus_manifest."""
     require_web_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": user_agent})  # noqa: S310  scheme confined by require_web_url above
     open_url = opener or tls.opener()

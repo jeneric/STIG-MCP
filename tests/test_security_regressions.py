@@ -178,24 +178,48 @@ def test_require_bare_name__a_name_the_real_index_publishes__is_accepted(name):
     fetch.require_bare_name(name)  # no exception
 
 
-def test_parse_index__a_row_whose_href_leaves_the_directory__refuses_the_page():
-    text = '<A HREF="../ESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
-    with pytest.raises(ValueError, match="plain filename"):
-        catalog.parse_index(text)
+def _sized(entries):
+    # fetch_disa still sums size_bytes, which parse_catalog leaves None until head_length fills it.
+    return [entry._replace(size_bytes=1) for entry in entries]
 
 
-def test_parse_index__a_percent_encoded_traversal__is_refused_after_unquoting():
+def _catalog_body(link):
+    return json.dumps({"returnValue": [{"DownloadLink": link, "UploadDate": "2026-10-05", "FileName": "x"}]})
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        catalog.ZIP_BASE + "../escape.zip",
+        catalog.ZIP_BASE + "%2e%2e%2fescape.zip",
+        catalog.ZIP_BASE + "sub/x.zip",
+    ],
+)
+def test_parse_catalog__a_link_under_zip_base_that_leaves_it__refuses_the_response(link):
     # The name is unquoted before the guard sees it, so an encoded separator cannot slip past
     # the way it would past a check on the raw href.
-    text = '<A HREF="%2e%2e%2fESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
     with pytest.raises(ValueError, match="plain filename"):
-        catalog.parse_index(text)
+        catalog.parse_catalog(_catalog_body(link))
 
 
-def test_fetch_disa__an_index_row_that_leaves_the_destination__writes_nothing_outside_it(tmp_path, monkeypatch):
+def test_parse_catalog__a_zip_on_another_host__is_ignored():
+    evil = "https://evil.example/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip"
+    good = catalog.ZIP_BASE + "U_Bar_V1R1_STIG.zip"
+    body = json.dumps(
+        {
+            "returnValue": [
+                {"DownloadLink": evil, "UploadDate": "2026-10-05", "FileName": "x"},
+                {"DownloadLink": good, "UploadDate": "2026-10-05", "FileName": "y"},
+            ]
+        }
+    )
+    assert [e.name for e in catalog.parse_catalog(body)] == ["U_Bar_V1R1_STIG.zip"]
+
+
+def test_fetch_disa__a_catalog_row_that_leaves_the_destination__writes_nothing_outside_it(tmp_path, monkeypatch):
     """The ESCAPE assertion is what must fail when the guard is gone, so the raise is tolerated.
 
-    Its sibling above pins the raise itself. Here the guard is removed from catalog.parse_index
+    Its sibling above pins the raise itself. Here the guard is removed from catalog.parse_catalog
     and the last line fails on the file that appeared outside dest, rather than on a DID NOT
     RAISE that would never reach it. tmp_path itself is the escape target, so the write an
     unguarded run makes lands inside this test's own directory and nowhere else, and the
@@ -205,12 +229,12 @@ def test_fetch_disa__an_index_row_that_leaves_the_destination__writes_nothing_ou
     dest = tmp_path / "sources"
     dest.mkdir()
     escaped = tmp_path / "ESCAPED.zip"
-    text = '<A HREF="../ESCAPED.zip">x</A>  13-Aug-2026 10:00  1k\n'
+    body = _catalog_body(catalog.ZIP_BASE + "../ESCAPED.zip")
     opener = _always_serving(b"payload an unguarded run would write outside dest")
     with contextlib.suppress(ValueError):
         # The parse is inside the suppression because the guard is what raises; without it
         # the whole call runs and the download lands outside dest.
-        fetch.fetch_disa(dest, opener=opener, entries=catalog.parse_index(text))
+        fetch.fetch_disa(dest, opener=opener, entries=_sized(catalog.parse_catalog(body)))
     assert not escaped.exists(), f"fetch_disa wrote {escaped}, outside the destination {dest}"
 
 
@@ -227,7 +251,7 @@ def test_fetch_disa__a_server_that_never_stops_resetting__is_asked_a_bounded_num
         requested.append(request.full_url)
         raise urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))
 
-    entries = catalog.parse_index('<A HREF="U_Foo_V1R1_STIG.zip">x</A> 10-Jul-2026 12:00  1k\n')
+    entries = _sized(catalog.parse_catalog(_catalog_body(catalog.ZIP_BASE + "U_Foo_V1R1_STIG.zip")))
     with pytest.raises(urllib.error.URLError):
         fetch.fetch_disa(tmp_path, opener=always_resetting, entries=entries, sleep=paused.append)
     assert len(requested) == fetch.RETRY_ATTEMPTS

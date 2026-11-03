@@ -52,7 +52,7 @@ def _catalog(sources_dir, record, built, with_built, opener):
 
 
 def _disa(manifest, built_library, with_built, opener):
-    entries = fetch.selection(catalog.parse_index(catalog.fetch_listing(opener=opener)))
+    entries = fetch.selection(catalog.parse_index(catalog.fetch_listing(catalog.INDEX_URL, opener=opener)))
     changes = fetch.diff(entries, manifest)
     entry = {**changes, "action": "refresh" if changes["new"] or changes["resized"] else "none"}
     if with_built:
