@@ -42,8 +42,8 @@ def parse_cci_list(path):
     if items_container is None:
         raise ValueError(
             f"{path} has no <cci_items> element, so it is not a DISA CCI list. Pass the "
-            f"U_CCI_List.xml downloaded from cyber.mil; docs/operations.md, section 'Build "
-            f"the knowledge base', names the file and where to get it."
+            f"CCI_List.xml from CCI_List.zip on cyber.mil, saved as U_CCI_List.xml; "
+            f"docs/operations.md, section 'Build the knowledge base', names the file and where to get it."
         )
     records = []
     for item in items_container:

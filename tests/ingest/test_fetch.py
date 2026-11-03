@@ -23,6 +23,7 @@ from stig_mcp.ingest.fetch import _TARGET_FILENAMES, SOURCE_URLS, manual_sources
 
 FIX = Path(__file__).parent.parent / "fixtures"
 INDEX = (FIX / "disa_index.html").read_text()
+CATALOG = (FIX / "cyber_mil_catalog.json").read_text(encoding="utf-8")
 
 
 def test_source_urls__the_three_automated_sources__are_named_and_are_https():
@@ -157,18 +158,24 @@ def test_selection__the_real_index__takes_library_sunset_cci_and_loose():
     names = {e.name for e in chosen}
     assert "U_SRG-STIG_Library_July_2026.zip" in names
     assert "U_Rev_4_SRG-STIG_Sunset_Compilation.zip" in names
-    assert "U_CCI_List.zip" in names
     assert "U_MS_Windows_Server_2019_V3R9_STIG.zip" in names
     assert not any("SCAP" in n for n in names)
     assert len(chosen) == len(names), "a name selected twice would be downloaded twice"
 
 
-def test_selection__the_cci_near_miss_on_the_real_index__takes_only_the_u_prefixed_one():
-    # The index publishes both U_CCI_List.zip (417792 bytes) and CCI_List.zip (434176).
-    # An exact-name match separates them; a substring or startswith test would not.
-    names = {e.name for e in fetch.selection(catalog.parse_index(INDEX))}
-    assert "U_CCI_List.zip" in names
-    assert "CCI_List.zip" not in names
+def test_selection__the_saved_catalog__takes_cci_list_zip():
+    names = {e.name for e in fetch.selection(catalog.parse_catalog(CATALOG))}
+    assert "CCI_List.zip" in names
+    assert "U_CCI_List.zip" not in names
+
+
+def test_selection__a_cci_near_miss__takes_only_the_exact_name():
+    # An exact-name match separates these; a substring or endswith test would take all three.
+    library = _entry("U_SRG-STIG_Library_July_2026.zip")
+    entries = [library, _entry("CCI_List.zip"), _entry("U_CCI_List.zip"), _entry("CCI_List_v2.zip")]
+    names = {e.name for e in fetch.selection(entries)}
+    assert "CCI_List.zip" in names
+    assert not names & {"U_CCI_List.zip", "CCI_List_v2.zip"}
 
 
 def test_selection__an_index_with_no_sunset_and_no_cci__takes_the_library_and_the_loose_stigs():
@@ -711,7 +718,7 @@ def _cci_zip(members):
     """A zip built in memory from member name to bytes.
 
     zipfile.writestr stores the name it is handed without sanitizing it, which is what lets a
-    test carry a member called ../U_CCI_List.xml. Built in code rather than checked in as a
+    test carry a member called ../CCI_List.xml. Built in code rather than checked in as a
     binary fixture, because the member names are the whole point and a fixture file's names
     cannot be read in a diff.
     """
@@ -726,19 +733,33 @@ def test_cci_zip__a_member_named_to_escape__is_stored_under_that_name(tmp_path):
     # Guards the helper above. If zipfile ever normalized the name away, the escape test
     # below would be handing extract_cci an ordinary archive and passing for that reason.
     path = tmp_path / "hostile.zip"
-    path.write_bytes(_cci_zip({"../U_CCI_List.xml": b"escaped"}))
+    path.write_bytes(_cci_zip({"../CCI_List.xml": b"escaped"}))
     with zipfile.ZipFile(path) as archive:
-        assert archive.namelist() == ["../U_CCI_List.xml"]
+        assert archive.namelist() == ["../CCI_List.xml"]
 
 
 def test_extract_cci__the_archive_the_fetch_takes__leaves_the_xml_the_ingest_reads(tmp_path):
     # source_status is the ingest's own answer to "is the CCI list here", so this cannot pass
     # while the ingest still cannot see the file: a member written under any other name fails.
-    path = tmp_path / "U_CCI_List.zip"
-    path.write_bytes(_cci_zip({"U_CCI_List.html": b"<html>", "U_CCI_List.xml": _CCI_XML, "README.TXT": b"read me"}))
+    path = tmp_path / "CCI_List.zip"
+    path.write_bytes(_cci_zip({"U_CCI_List.html": b"<html>", "CCI_List.xml": _CCI_XML, "README.TXT": b"read me"}))
     written = fetch.extract_cci(tmp_path)
     assert inventory.source_status(tmp_path)["DISA CCI list"] is True
     assert written.read_bytes() == _CCI_XML
+
+
+def test_extract_cci__cci_list_zip__writes_u_cci_list_xml(tmp_path):
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"CCI_List.xml": b"known bytes"}))
+    fetch.extract_cci(tmp_path)
+    assert (tmp_path / "U_CCI_List.xml").read_bytes() == b"known bytes"
+
+
+def test_extract_cci__archive_missing_the_member__names_both_names(tmp_path):
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"README.TXT": b"nothing useful"}))
+    with pytest.raises(RuntimeError) as excinfo:
+        fetch.extract_cci(tmp_path)
+    assert "CCI_List.xml" in str(excinfo.value)
+    assert "CCI_List.zip" in str(excinfo.value)
 
 
 def test_extract_cci__no_archive_in_the_directory__leaves_a_hand_placed_xml_untouched(tmp_path):
@@ -753,7 +774,7 @@ def test_extract_cci__an_xml_left_by_an_earlier_release__is_replaced_by_the_arch
     # contents. An XML from an older release surviving a fetch that took a newer archive is
     # the worse failure, because nothing would ever report it.
     (tmp_path / "U_CCI_List.xml").write_bytes(b"an older release")
-    (tmp_path / "U_CCI_List.zip").write_bytes(_cci_zip({"U_CCI_List.xml": _CCI_XML}))
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"CCI_List.xml": _CCI_XML}))
     fetch.extract_cci(tmp_path)
     assert (tmp_path / "U_CCI_List.xml").read_bytes() == _CCI_XML
 
@@ -769,33 +790,34 @@ def test_extract_cci__a_member_named_to_escape_the_directory__writes_no_file_out
     # happily, and the two paths below would never be looked at at all.
     sources = tmp_path / "sources"
     sources.mkdir()
-    (sources / "U_CCI_List.zip").write_bytes(_cci_zip({"../U_CCI_List.xml": b"escaped"}))
+    (sources / "CCI_List.zip").write_bytes(_cci_zip({"../CCI_List.xml": b"escaped"}))
     with contextlib.suppress(RuntimeError):
         fetch.extract_cci(sources)
-    assert not (tmp_path / "U_CCI_List.xml").exists()
-    assert not (sources / "U_CCI_List.xml").exists()
+    for name in ("CCI_List.xml", "U_CCI_List.xml"):
+        assert not (tmp_path / name).exists()
+        assert not (sources / name).exists()
 
 
 def test_extract_cci__a_member_named_to_escape_the_directory__refuses_and_names_the_member(tmp_path):
     # The other half of the test above: the archive carries no member under the name asked
     # for, so the operator is told rather than left with a silently absent XML.
-    (tmp_path / "U_CCI_List.zip").write_bytes(_cci_zip({"../U_CCI_List.xml": b"escaped"}))
-    with pytest.raises(RuntimeError, match="U_CCI_List.xml"):
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"../CCI_List.xml": b"escaped"}))
+    with pytest.raises(RuntimeError, match="CCI_List.xml"):
         fetch.extract_cci(tmp_path)
 
 
 def test_extract_cci__an_archive_that_will_not_open__names_the_file_and_the_manual_remedy(tmp_path):
-    (tmp_path / "U_CCI_List.zip").write_bytes(b"not a zip at all")
+    (tmp_path / "CCI_List.zip").write_bytes(b"not a zip at all")
     with pytest.raises(RuntimeError) as excinfo:
         fetch.extract_cci(tmp_path)
     message = str(excinfo.value)
-    assert str(tmp_path / "U_CCI_List.zip") in message
+    assert str(tmp_path / "CCI_List.zip") in message
     assert "by hand" in message
 
 
 def test_fetch_disa__the_cci_archive_downloaded__leaves_the_xml_and_reports_it(tmp_path):
-    entries = [_entry("U_CCI_List.zip")]
-    opener = _Opener({_url("U_CCI_List.zip"): _cci_zip({"U_CCI_List.xml": _CCI_XML})})
+    entries = [_entry("CCI_List.zip")]
+    opener = _Opener({_url("CCI_List.zip"): _cci_zip({"CCI_List.xml": _CCI_XML})})
     written = fetch.fetch_disa(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
     assert inventory.source_status(tmp_path)["DISA CCI list"] is True
     assert (tmp_path / "U_CCI_List.xml").read_bytes() == _CCI_XML
@@ -807,8 +829,8 @@ def test_fetch_disa__the_cci_archive_downloaded__leaves_the_xml_and_reports_it(t
 def test_fetch_disa__the_archive_skipped_but_the_xml_gone__restores_it_without_a_request(tmp_path):
     # The second run of the two-command flow, with the XML deleted in between. The manifest
     # still matches the zip, so nothing is downloaded and only the extraction can restore it.
-    entries = [_entry("U_CCI_List.zip")]
-    (tmp_path / "U_CCI_List.zip").write_bytes(_cci_zip({"U_CCI_List.xml": _CCI_XML}))
+    entries = [_entry("CCI_List.zip")]
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"CCI_List.xml": _CCI_XML}))
     fetch.write_manifest(tmp_path, entries)
     opener = _Opener({})
     fetch.fetch_disa(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
@@ -820,7 +842,7 @@ def test_fetch_disa__a_subset_that_does_not_name_the_cci_archive__still_extracts
     # --refresh passes the entries the index carries and most runs have no CCI change in
     # them, while the archive sits in the directory throughout. Keying the extraction on the
     # archive rather than on this run's entries is what covers those runs.
-    (tmp_path / "U_CCI_List.zip").write_bytes(_cci_zip({"U_CCI_List.xml": _CCI_XML}))
+    (tmp_path / "CCI_List.zip").write_bytes(_cci_zip({"CCI_List.xml": _CCI_XML}))
     opener = _Opener({_url("a.zip"): b"12345"})
     fetch.fetch_disa(tmp_path, opener=opener, entries=[_entry("a.zip")], sleep=lambda _seconds: None)
     assert (tmp_path / "U_CCI_List.xml").read_bytes() == _CCI_XML
@@ -830,9 +852,9 @@ def test_fetch_disa__a_download_failing_after_the_cci_archive_arrived__extracts_
     # The extraction runs only after every download has succeeded, so a run that raises leaves
     # no XML however far it got. Nothing is lost by that: the retry skips the archive on the
     # manifest and extracts from it. Pinned because the docstring rules on it.
-    entries = [_entry("U_CCI_List.zip"), _entry("b.zip")]
-    archive = _cci_zip({"U_CCI_List.xml": _CCI_XML})
-    failing = _Opener({_url("U_CCI_List.zip"): archive, _url("b.zip"): OSError("connection reset")})
+    entries = [_entry("CCI_List.zip"), _entry("b.zip")]
+    archive = _cci_zip({"CCI_List.xml": _CCI_XML})
+    failing = _Opener({_url("CCI_List.zip"): archive, _url("b.zip"): OSError("connection reset")})
     with pytest.raises(OSError, match="connection reset"):
         fetch.fetch_disa(tmp_path, opener=failing, entries=entries, sleep=lambda _seconds: None)
     assert not (tmp_path / "U_CCI_List.xml").exists()
@@ -846,8 +868,8 @@ def test_fetch_disa_or_advise__a_cci_archive_that_will_not_open__prints_the_manu
     # An extraction failure must reach the operator the way a download failure does. BadZipFile
     # subclasses Exception rather than OSError, so raising it unconverted would leave the
     # command with a traceback and no advice at all.
-    entries = [_entry("U_CCI_List.zip")]
-    opener = _Opener({_url("U_CCI_List.zip"): b"not a zip at all"})
+    entries = [_entry("CCI_List.zip")]
+    opener = _Opener({_url("CCI_List.zip"): b"not a zip at all"})
     with pytest.raises(RuntimeError):
         fetch._fetch_disa_or_advise(tmp_path, opener=opener, entries=entries, sleep=lambda _seconds: None)
     printed = capsys.readouterr().out
@@ -1007,12 +1029,12 @@ def test_run_check__a_withdrawal_sharing_a_product_but_not_a_version_scheme__is_
 
 
 def test_run_check__a_withdrawn_name_with_no_version_pattern__is_reported_without_a_superseded_note(tmp_path, capsys):
-    # U_CCI_List.zip carries no _V#R#_ or _Y##M##_ suffix at all, unlike a benchmark filename,
+    # CCI_List.zip carries no _V#R#_ or _Y##M##_ suffix at all, unlike a benchmark filename,
     # so it can never be matched to a replacement even while an unrelated product bumps
     # version in the same run.
     before_index = (
         '<A HREF="U_SRG-STIG_Library_July_2026.zip">lib</A> 13-Jul-2026 12:00  5k\n'
-        '<A HREF="U_CCI_List.zip">cci</A> 10-Jul-2026 12:00  400k\n'
+        '<A HREF="CCI_List.zip">cci</A> 10-Jul-2026 12:00  400k\n'
         '<A HREF="U_Foo_V1R1_STIG.zip">foo</A> 10-Jul-2026 12:00  1k\n'
     )
     after_index = (
@@ -1023,7 +1045,7 @@ def test_run_check__a_withdrawn_name_with_no_version_pattern__is_reported_withou
     opener = _Opener({catalog.INDEX_URL: after_index.encode()})
     fetch._run_check(tmp_path, opener=opener)
     lines = capsys.readouterr().out.splitlines()
-    assert "  withdrawn: U_CCI_List.zip" in lines
+    assert "  withdrawn: CCI_List.zip" in lines
     assert "  withdrawn: U_Foo_V1R1_STIG.zip (superseded by U_Foo_V1R2_STIG.zip)" in lines
 
 
@@ -1143,12 +1165,24 @@ def test_prune__the_xml_extracted_from_the_cci_archive__survives_a_call_that_del
     extracted = tmp_path / "U_CCI_List.xml"
     extracted.write_bytes(_CCI_XML)
     armed_old, armed_new = _armed_pair(tmp_path)
-    before = _manifest(tmp_path, _entry("U_CCI_List.zip"), armed_old)
-    entries = [_new_entry("U_CCI_List.zip"), armed_new]
+    before = _manifest(tmp_path, _entry("CCI_List.zip"), armed_old)
+    entries = [_new_entry("CCI_List.zip"), armed_new]
     _fetched(tmp_path, *entries)
     result = fetch.prune(tmp_path, entries, before)
     assert extracted.read_bytes() == _CCI_XML
     assert result == {"deleted": [armed_old.name], "retained": [], "dropped": []}
+
+
+def test_prune__old_u_cci_list_zip_with_drop_withdrawn__is_dropped(tmp_path):
+    # The old name is an ordinary withdrawn file now; only CCI_List.zip is protected.
+    old = tmp_path / "U_CCI_List.zip"
+    old.write_bytes(b"cci")
+    armed_old, armed_new = _armed_pair(tmp_path)
+    before = _manifest(tmp_path, _entry(old.name), armed_old)
+    _fetched(tmp_path, armed_new)
+    result = fetch.prune(tmp_path, [armed_new], before, drop_withdrawn=True)
+    assert not old.exists()
+    assert old.name in result["dropped"]
 
 
 def test_prune__a_product_withdrawn_from_the_index__is_retained_while_a_superseded_one_is_deleted(tmp_path):
@@ -1333,7 +1367,7 @@ def test_prune__drop_withdrawn_a_product_the_index_no_longer_carries__is_dropped
 def test_prune__drop_withdrawn_the_cci_list_withdrawn__keeps_it(tmp_path):
     # The ingest cannot run without the CCI list, and _product_key cannot key it, so it is the
     # one withdrawal the flag must not act on. A second withdrawal is dropped in the same call.
-    cci = tmp_path / "U_CCI_List.zip"
+    cci = tmp_path / "CCI_List.zip"
     cci.write_bytes(b"cci")
     gone = tmp_path / "U_Old_Product_V1R1_STIG.zip"
     gone.write_bytes(b"withdrawn")
@@ -1527,14 +1561,14 @@ def test_main__default_action__also_fetches_from_disa(monkeypatch, tmp_path, cap
 
     def fake_fetch_disa(dest_dir, delay=0.25):
         calls.append((dest_dir, delay))
-        return [tmp_path / "U_CCI_List.zip"]
+        return [tmp_path / "CCI_List.zip"]
 
     monkeypatch.setattr(fetch, "fetch_disa", fake_fetch_disa)
     fetch.main()
     assert calls == [(tmp_path, 0.25)]
     out = capsys.readouterr().out
     assert "enterprise-attack.json" in out
-    assert "U_CCI_List.zip" in out
+    assert "CCI_List.zip" in out
 
 
 def test_main__disa_fetch_fails__prints_manual_sources_and_reraises(monkeypatch, tmp_path, capsys):

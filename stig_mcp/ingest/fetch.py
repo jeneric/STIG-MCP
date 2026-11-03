@@ -49,11 +49,12 @@ def _usable_public(section):
 # without demanding a partition.
 REQUIRED_FREE_BYTES = 2 * 1024**3
 
-_CCI_NAME = "U_CCI_List.zip"
+_CCI_NAME = "CCI_List.zip"
 # Kept even by --drop-withdrawn: the ingest cannot run without it, and _product_key cannot key it.
 NEVER_DROPPED = frozenset({_CCI_NAME})
-# What DISA ships inside _CCI_NAME and what the ingest reads: inventory._SOURCE_FILES and
-# orchestrator both name this file, and neither knows the archive exists.
+_CCI_ARCHIVE_MEMBER = "CCI_List.xml"
+# The on-disk name the ingest reads: inventory._SOURCE_FILES and orchestrator both name it,
+# and neither knows the archive exists.
 _CCI_MEMBER = "U_CCI_List.xml"
 _DOWNLOAD_TIMEOUT = 120
 _DIGEST_CHUNK = 1024 * 1024
@@ -89,7 +90,8 @@ def manual_sources():
     # stig-mcp-ingest reports, including when STIG_MCP_DATA is set.
     return [
         f"DISA STIG Library Compilation (quarterly zip) -> extract *xccdf.xml into {config.SOURCES_DIR}",
-        f"DISA CCI List (U_CCI_List.xml) -> place in {config.SOURCES_DIR}",
+        f"DISA CCI List (download CCI_List.zip, save its CCI_List.xml as U_CCI_List.xml) -> place in "
+        f"{config.SOURCES_DIR}",
         f"Loose product STIG zips (optional, broadens coverage) -> place in {config.SOURCES_DIR}",
     ]
 
@@ -281,8 +283,8 @@ def selection(entries):
     archive = catalog.sunset(entries)
     if archive is not None:
         chosen.append(archive)
-    # Exact name, never a substring: the index publishes both U_CCI_List.zip and a differently
-    # sized CCI_List.zip, and only the full name separates them.
+    # Exact name, never a substring: the catalog can list near-miss names such as
+    # U_CCI_List.zip or CCI_List_v2.zip, and only the full name separates them.
     cci = next((e for e in entries if e.name == _CCI_NAME), None)
     if cci is not None:
         chosen.append(cci)
@@ -509,6 +511,8 @@ def _download(open_url, url, target, user_agent):
 def extract_cci(dest_dir):
     """Put U_CCI_List.xml beside the archive a fetch took, or nothing when there is no archive.
 
+    The archive's member is CCI_List.xml; the ingest reads it under the on-disk name U_CCI_List.xml.
+
     DISA publishes the CCI list only as a zip and the ingest reads the XML inside it
     (inventory._SOURCE_FILES, and the cci_path orchestrator builds). Without this the two
     documented commands do not compose at all: the fetch completes and the ingest then stops
@@ -528,7 +532,7 @@ def extract_cci(dest_dir):
 
     Reads exactly one member, by exact key, into a destination built from module constants
     alone. No name out of the archive reaches the path written to and extractall is never
-    called, so a member called ../U_CCI_List.xml or /etc/passwd is not dangerous but simply
+    called, so a member called ../CCI_List.xml or /etc/passwd is not dangerous but simply
     absent: it is not the key asked for, and the read raises instead.
 
     Every failure of the READ becomes a RuntimeError. _fetch_disa_or_advise catches
@@ -543,12 +547,12 @@ def extract_cci(dest_dir):
         return None
     try:
         with zipfile.ZipFile(archive_path) as archive:
-            data = archive.read(_CCI_MEMBER)
+            data = archive.read(_CCI_ARCHIVE_MEMBER)
     except (zipfile.BadZipFile, KeyError, OSError, EOFError, zlib.error) as exc:
         raise RuntimeError(
-            f"Cannot read {_CCI_MEMBER} out of {archive_path}: {exc}. Delete that archive and "
+            f"Cannot read {_CCI_ARCHIVE_MEMBER} out of {archive_path}: {exc}. Delete that archive and "
             f"run stig-mcp-fetch again to take it afresh, or download {_CCI_NAME} from "
-            f"cyber.mil and place {_CCI_MEMBER} from it in {dest_dir} by hand."
+            f"cyber.mil and place {_CCI_ARCHIVE_MEMBER} from it in {dest_dir} as {_CCI_MEMBER} by hand."
         ) from exc
     target = Path(dest_dir) / _CCI_MEMBER
     target.write_bytes(data)
