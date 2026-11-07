@@ -55,14 +55,14 @@ def _stored(conn):
     return held
 
 
-def tripwire(conn, index_names):
-    """Each benchmark on the index against what the knowledge base stores for the same product,
+def tripwire(conn, published_names):
+    """Each benchmark DISA publishes against what the knowledge base stores for the same product,
     scheme and major. Only stale fails the build: other_major and unmatched are notes, because
-    the library-wins rule keeps an older major on the index on purpose, and DISA keeps listing
+    the library-wins rule keeps an older major DISA still publishes on purpose, and DISA keeps listing
     renamed products under their old names, which no stored benchmark came from."""
     held = _stored(conn)
     result = {"stale": [], "other_major": [], "unmatched": []}
-    for name in sorted(index_names):
+    for name in sorted(published_names):
         key, release = _key(name) if catalog.tier_of(name) == catalog.BENCHMARK else (None, None)
         if key is None:
             continue
@@ -147,7 +147,7 @@ def verify(kb_path, sources_dir, golden=GOLDEN):
     manifest = fetch.read_manifest(sources_dir)["entries"]
     if not manifest:
         raise VerifyError(
-            f"{sources_dir} has no fetch manifest, so the tripwire has no index to compare against. "
+            f"{sources_dir} has no fetch manifest, so the tripwire has no list of published files to compare against. "
             f"Run stig-mcp-fetch --refresh --drop-withdrawn, then stig-mcp-ingest."
         )
     failures = [f"not recorded by stig-mcp-fetch: {name}" for name in unrecorded_files(sources_dir)]

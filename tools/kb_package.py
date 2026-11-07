@@ -40,7 +40,7 @@ def compress(src, dest):
 
 def source_file(row):
     """The DISA zip a benchmark came out of: the inner zip for a compilation member, the loose
-    zip otherwise. The same file name the index lists, so the tripwire can compare the two.
+    zip otherwise. The same file name the fetch manifest records, so the tripwire can compare the two.
 
     A compilation member's source_member is the archive member's full path (namelist, via
     library.iter_stig_members), not a bare name: DISA nests every inner zip of a library

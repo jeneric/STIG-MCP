@@ -200,7 +200,8 @@ from GitHub before it ever reaches DISA.
 
 #### If the catalog read fails
 
-Three errors name a change on DISA's side, and each says what to compare.
+Three errors come from reading the catalog, and each says what to check. The first two mean
+DISA changed the catalog; the third can also be this machine's access or a transient failure.
 
 - **"The Apex class id changes when DISA redeploys it".** The catalog call is addressed to
   an Apex class by record id, and DISA changes that id when it redeploys the page. Update
