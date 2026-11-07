@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - stig_mcp/tls.py
+      - stig_mcp/github_auth.py
       - stig_mcp/kb/releases.py
       - stig_mcp/ingest/fetch.py
       - stig_mcp/ingest/catalog.py
@@ -46,6 +47,8 @@ jobs:
       STRICT_REASON: ${{ matrix.os != 'macos-latest' && (matrix.python == '3.13' || matrix.python == '3.14') && 'not marked critical' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install the project and mitmproxy before any proxy is in the way
         run: |
@@ -92,6 +95,8 @@ jobs:
       UV_PYTHON: "3.14"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install the project and mitmproxy before any proxy is in the way
         run: |
@@ -113,7 +118,11 @@ jobs:
         run: tools/tls_ci.sh with-proxy "$CAS/strict" uv run --no-sync stig-mcp-install-kb
       - name: Install the knowledge base with no proxy
         if: runner.os == 'macOS'
-        run: uv run --no-sync stig-mcp-install-kb
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo "::add-mask::$GITHUB_TOKEN"
+          uv run --no-sync stig-mcp-install-kb
       - name: The knowledge base landed
         run: test -s "$STIG_MCP_DATA/stig_kb.sqlite"
 
@@ -132,6 +141,8 @@ jobs:
       UV_PYTHON_DOWNLOADS: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Fetch Python, mitmproxy and uv 0.10.12 before any proxy is in the way
         env:
@@ -190,6 +201,8 @@ jobs:
       IMAGE: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Take uv's static binary, which runs on glibc and musl alike
         run: |
           id=$(docker create ghcr.io/astral-sh/uv:0.11.29)

@@ -20,6 +20,7 @@ the details behind it and the fixes for when it does not work.
   - [Behind a TLS-inspecting proxy](#behind-a-tls-inspecting-proxy)
   - [Downloads time out behind a proxy](#downloads-time-out-behind-a-proxy)
   - ["This Model Context Protocol server is not in the list of servers allowed by your organization"](#this-model-context-protocol-server-is-not-in-the-list-of-servers-allowed-by-your-organization)
+  - [GitHub's rate limit](#githubs-rate-limit)
   - [The GitHub source archive stops downloading partway](#the-github-source-archive-stops-downloading-partway)
 
 ## VS Code (GitHub Copilot)
@@ -254,6 +255,44 @@ repository). A `serverCommand` entry must give the exact command and every argum
 `{"serverCommand": ["uvx", "stig-mcp"]}` for the badge's configuration. A
 `{"serverName": "stig-mcp"}` entry is simpler but weaker, because anyone can give a server that
 name.
+
+### GitHub's rate limit
+
+Installing the knowledge base and checking its sources ask GitHub's API what is published.
+Without a token, GitHub allows 60 of those requests per hour for each network address, and
+everyone behind one address shares the count. In an office or an enclave behind one proxy,
+that includes every other tool on the network that calls GitHub's API without a token, so
+the limit can run out before you have made a single request yourself. The error names the
+time the limit resets.
+
+A token raises the limit to 5,000 requests per hour for your account and nothing else. It
+grants no new access: stig-mcp reads only public data. Create a fine-grained personal access
+token at github.com under Settings, Developer settings, Personal access tokens, limited to
+public repositories, with no permissions beyond read-only, and a short expiry. stig-mcp reads
+it from `GITHUB_TOKEN` and sends it only to `api.github.com`, over https.
+
+For the command-line tools, export it for the session, or set it for one command:
+
+    export GITHUB_TOKEN=github_pat_...
+    GITHUB_TOKEN="$(gh auth token)" uvx --from stig-mcp stig-mcp-install-kb
+
+For the server under Claude Code, store it in your user configuration:
+
+    claude mcp add stig-mcp --scope user -e UV_SYSTEM_CERTS=true -e UV_NATIVE_TLS=true -e GITHUB_TOKEN=github_pat_... -- uvx stig-mcp
+
+Never add `--scope project` with a literal token: project scope writes `.mcp.json` in the
+project root, which is usually committed.
+
+For a client configured with JSON, take the value from your environment instead of writing it
+in the file, by adding this line to the server's `env`:
+
+    "GITHUB_TOKEN": "${GITHUB_TOKEN:-}"
+
+This form needs a client that expands variables, as Claude Code does. Keep the `:-`. In
+Claude Code, a bare `${GITHUB_TOKEN}` that is unset reaches the server as that literal text.
+With `:-` an unset variable becomes an empty value, which stig-mcp treats as no token. A
+client that does not expand variables would send the text as it is, so check its documentation,
+and never put a literal token in a file that is committed.
 
 ### The GitHub source archive stops downloading partway
 

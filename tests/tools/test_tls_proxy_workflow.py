@@ -149,7 +149,45 @@ def test_tls_proxy_workflow__install_kb__installs_with_no_proxy_on_macos_only():
     steps = _doc()["jobs"]["install-kb"]["steps"]
     (step,) = [s for s in steps if s.get("name") == "Install the knowledge base with no proxy"]
     assert step["if"] == "runner.os == 'macOS'"
-    assert step["run"] == "uv run --no-sync stig-mcp-install-kb"
+    assert step["run"].splitlines()[-1] == "uv run --no-sync stig-mcp-install-kb"
+
+
+_UNPROXIED_INSTALL = "Install the knowledge base with no proxy"
+
+
+def _unproxied_install_step():
+    (step,) = [s for _, s in _steps() if s.get("name") == _UNPROXIED_INSTALL]
+    return step
+
+
+def test_tls_proxy_workflow__github_token__is_given_to_the_unproxied_macos_install_step_only():
+    holders = [step for _, step in _steps() if "github.token" in str(step.get("env", {}))]
+    assert holders, "no step receives github.token, so nothing was checked"
+    assert [step["name"] for step in holders] == [_UNPROXIED_INSTALL]
+    assert holders[0]["if"] == "runner.os == 'macOS'"
+    assert holders[0]["env"] == {"GITHUB_TOKEN": "${{ github.token }}"}
+    assert [name for name, job in _doc()["jobs"].items() if "github.token" in str(job.get("env", {}))] == []
+    assert "github.token" not in str({k: v for k, v in _doc().items() if k != "jobs"})
+
+
+def test_tls_proxy_workflow__github_token_step__masks_the_token_first():
+    assert _unproxied_install_step()["run"].startswith('echo "::add-mask::$GITHUB_TOKEN"\n')
+
+
+def test_tls_proxy_workflow__no_step__writes_github_token_to_github_env():
+    runs = [step.get("run", "") for _, step in _steps()]
+    assert any("GITHUB_ENV" in run for run in runs), "no step writes GITHUB_ENV, so nothing was checked"
+    assert [run for run in runs if "GITHUB_TOKEN" in run and "GITHUB_ENV" in run] == []
+
+
+def test_tls_proxy_workflow__every_checkout__sets_persist_credentials_false():
+    checkouts = [step for _, step in _steps() if step.get("uses", "").startswith("actions/checkout@")]
+    assert len(checkouts) == 4, "the workflow has four checkouts"
+    assert [step for step in checkouts if step.get("with", {}).get("persist-credentials") is not False] == []
+
+
+def test_tls_proxy_workflow__pull_request_paths__include_github_auth():
+    assert "stig_mcp/github_auth.py" in _triggers()["pull_request"]["paths"]
 
 
 def test_tls_proxy_workflow__make_cas_steps__run_on_every_os():
