@@ -1,9 +1,11 @@
+import email.message
 import io
 import json
+import urllib.error
 
 import pytest
 
-from stig_mcp import tls
+from stig_mcp import github_auth, tls
 from stig_mcp.ingest import upstream
 
 
@@ -170,3 +172,122 @@ def test_get_json__no_opener_given__opens_through_the_truststore_opener(monkeypa
     monkeypatch.setattr(tls, "opener", _refusing_opener)
     with pytest.raises(_Reached, match="attack-stix-data"):
         upstream.get_json(upstream.ATTACK_INDEX_URL)
+
+
+class _Recorder:
+    def __init__(self, body=b"[]", error=None):
+        self.body = body
+        self.error = error
+        self.requests = []
+
+    def __call__(self, request, timeout=None):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return io.BytesIO(self.body)
+
+
+def _http_error(url, code, headers=None):
+    message = email.message.Message()
+    for name, value in (headers or {}).items():
+        message[name] = value
+    return urllib.error.HTTPError(url, code, "error", message, None)
+
+
+def test_ctid_latest__github_token_set__sends_it_to_the_api(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    recorder = _Recorder(json.dumps([{"name": "attack-16.1", "type": "dir"}]).encode())
+    upstream.ctid_latest(recorder)
+    assert recorder.requests[0].get_header("Authorization") == "Bearer t0k"
+
+
+def test_attack_latest__github_token_set__sends_no_authorization_to_raw_githubusercontent(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    recorder = _Recorder(json.dumps(_index("16.1")).encode())
+    upstream.attack_latest(recorder)
+    assert not recorder.requests[0].has_header("Authorization")
+
+
+def test_get_json__github_token_unset__sends_exactly_the_original_headers(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    recorder = _Recorder()
+    upstream.get_json(upstream.CTID_LISTING_URL, recorder, accept=upstream.GITHUB_ACCEPT)
+    assert sorted(recorder.requests[0].header_items()) == [
+        ("Accept", upstream.GITHUB_ACCEPT),
+        ("User-agent", upstream.USER_AGENT),
+    ]
+
+
+def test_get_json__no_opener_given__opens_with_the_auth_stripping_redirect_handler(monkeypatch):
+    seen = []
+
+    def fake_opener(*handlers):
+        seen.extend(handlers)
+        return _Recorder()
+
+    monkeypatch.setattr(tls, "opener", fake_opener)
+    upstream.get_json(upstream.CTID_LISTING_URL)
+    assert [type(handler) for handler in seen] == [github_auth.StripAuthOffApi]
+
+
+def test_get_json__rate_limited_without_token__names_github_token_once(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    error = _http_error(upstream.CTID_LISTING_URL, 403, {"X-RateLimit-Remaining": "0"})
+    with pytest.raises(upstream.UpstreamError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    message = str(excinfo.value)
+    assert "Set GITHUB_TOKEN" in message
+    assert message.count("unauthenticated") == 1
+    assert excinfo.value.__cause__ is error
+
+
+def test_get_json__rate_limited_with_token__reports_the_token_limit_not_to_set_it(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = _http_error(upstream.CTID_LISTING_URL, 429, {"X-RateLimit-Remaining": "0"})
+    with pytest.raises(upstream.UpstreamError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    message = str(excinfo.value)
+    assert "rate limit for your GITHUB_TOKEN is used up" in message
+    assert "Set GITHUB_TOKEN" not in message
+    assert "unauthenticated" not in message
+
+
+def test_get_json__401_with_token__says_the_token_was_rejected(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = _http_error(upstream.CTID_LISTING_URL, 401)
+    with pytest.raises(upstream.UpstreamError, match="GITHUB_TOKEN was rejected") as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert excinfo.value.__cause__ is error
+
+
+def test_get_json__401_without_token__propagates_unchanged(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    error = _http_error(upstream.CTID_LISTING_URL, 401)
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert excinfo.value is error
+
+
+@pytest.mark.parametrize("code", [404, 500])
+def test_get_json__other_http_error__propagates_unchanged(monkeypatch, code):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = _http_error(upstream.CTID_LISTING_URL, code)
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert excinfo.value is error
+
+
+def test_get_json__forbidden_without_rate_limit_header__propagates_unchanged(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = _http_error(upstream.CTID_LISTING_URL, 403, {"X-RateLimit-Remaining": "12"})
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert excinfo.value is error
+
+
+def test_get_json__url_error__propagates_unchanged(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = urllib.error.URLError(OSError("refused"))
+    with pytest.raises(urllib.error.URLError) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert excinfo.value is error

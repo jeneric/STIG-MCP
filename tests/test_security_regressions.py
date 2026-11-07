@@ -1468,3 +1468,24 @@ def test_releases__every_failure_message__never_contains_the_token(monkeypatch, 
         releases.list_releases(failing_opener)
     assert "SECRET-t0k" not in str(excinfo.value)
     assert "SECRET-t0k" not in releases.explain(failure, releases.LISTING_URL)
+
+
+_UPSTREAM_TOKEN_CASES = {
+    "rate_limited": http_error(upstream.CTID_LISTING_URL, 403, {"X-RateLimit-Remaining": "0"}),
+    "unauthorized": http_error(upstream.CTID_LISTING_URL, 401),
+    "not_found": http_error(upstream.CTID_LISTING_URL, 404),
+}
+
+
+@pytest.mark.parametrize("failure", list(_UPSTREAM_TOKEN_CASES.values()), ids=list(_UPSTREAM_TOKEN_CASES))
+def test_upstream__failure_messages__never_contain_the_token(monkeypatch, failure):
+    monkeypatch.setenv("GITHUB_TOKEN", "SECRET-t0k")
+
+    def failing_opener(request, timeout=None):
+        raise failure
+
+    with pytest.raises((upstream.UpstreamError, urllib.error.HTTPError)) as excinfo:
+        upstream.get_json(upstream.CTID_LISTING_URL, failing_opener)
+    assert "SECRET-t0k" not in str(excinfo.value)
+    if isinstance(excinfo.value, upstream.UpstreamError):
+        assert "GITHUB_TOKEN" in str(excinfo.value)

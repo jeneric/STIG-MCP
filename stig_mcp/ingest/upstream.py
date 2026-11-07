@@ -8,18 +8,20 @@ import hashlib
 import json
 import logging
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from stig_mcp import tls
+from stig_mcp import github_auth, tls
 
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "stig-mcp"
 TIMEOUT = 10
 GITHUB_ACCEPT = "application/vnd.github+json"
+_HTTP_UNAUTHORIZED = 401
 
 ATTACK_INDEX_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/index.json"
 ATTACK_URL_PREFIX = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/"
@@ -103,15 +105,39 @@ def parse_attack_index(doc):
     return AttackIndex(latest, {release.version: release.release_date for release in releases})
 
 
+def _explain_refusal(exc, url, token_sent):
+    """The UpstreamError text for a rate-limited or token-rejected response, else None."""
+    if github_auth.rate_limited(exc):
+        if token_sent:
+            return f"{url} refused the request: the rate limit for your GITHUB_TOKEN is used up. Try again later."
+        return (
+            f"{url} refused the request: GitHub's limit of 60 unauthenticated requests per hour "
+            f"from this address is used up. {github_auth.RATE_LIMIT_HINT}"
+        )
+    if exc.code == _HTTP_UNAUTHORIZED and token_sent:
+        return (
+            f"{url} rejected the request: GITHUB_TOKEN was rejected with HTTP 401. Replace it with a "
+            f"valid token or unset it; an unexpanded ${{GITHUB_TOKEN}} placeholder in an MCP client "
+            f"config is one cause."
+        )
+    return None
+
+
 def get_json(url, opener=None, accept=None):
-    headers = {"User-Agent": USER_AGENT}
-    if accept:
-        headers["Accept"] = accept
+    auth = github_auth.auth_headers(url)
+    headers = {"User-Agent": USER_AGENT, **({"Accept": accept} if accept else {}), **auth}
     # S310: every caller passes one of this module's https constants.
     request = urllib.request.Request(url, headers=headers)  # noqa: S310
-    open_url = opener or tls.opener()
-    with open_url(request, timeout=TIMEOUT) as response:
-        body = response.read()
+    open_url = opener or tls.opener(github_auth.StripAuthOffApi())
+    try:
+        with open_url(request, timeout=TIMEOUT) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        message = _explain_refusal(exc, url, bool(auth))
+        if message is None:
+            raise
+        exc.close()
+        raise UpstreamError(message) from exc
     try:
         return json.loads(body)
     except ValueError as exc:
