@@ -283,7 +283,11 @@ def explain(exc, url):
 
 def _open(url, opener, accept=None):
     require_allowed(url)
-    headers = {"User-Agent": USER_AGENT, **({"Accept": accept} if accept else {}), **github_auth.auth_headers(url)}
+    try:
+        auth = github_auth.auth_headers(url)
+    except github_auth.InvalidGithubToken as exc:
+        raise ReleaseError(str(exc)) from None
+    headers = {"User-Agent": USER_AGENT, **({"Accept": accept} if accept else {}), **auth}
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 (require_allowed checked scheme and host)
     try:
         response = (opener or default_opener())(request, timeout=TIMEOUT)

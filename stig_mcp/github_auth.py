@@ -24,9 +24,25 @@ RATE_LIMIT_HINT = (
 _RESET_RE = re.compile(r"[0-9]{1,10}", re.ASCII)
 
 
+_HEADER_SAFE_RE = re.compile(r"[\x21-\x7e]+")
+
+
+class InvalidGithubToken(ValueError):
+    """Raised without the value, or anything derived from it, so no log or report can leak it."""
+
+
 def token(environ=None):
     environ = os.environ if environ is None else environ
-    return (environ.get("GITHUB_TOKEN") or "").strip() or None
+    value = (environ.get("GITHUB_TOKEN") or "").strip()
+    if not value:
+        return None
+    if not _HEADER_SAFE_RE.fullmatch(value):
+        raise InvalidGithubToken(
+            "GITHUB_TOKEN contains a character that cannot be sent in an HTTP header. Remove any "
+            "line breaks, spaces or non-ASCII characters from it, or unset GITHUB_TOKEN to run "
+            "without a token."
+        )
+    return value
 
 
 def _is_api_url(url):
@@ -35,8 +51,10 @@ def _is_api_url(url):
 
 
 def auth_headers(url, environ=None):
+    if not _is_api_url(url):
+        return {}
     value = token(environ)
-    if value is None or not _is_api_url(url):
+    if value is None:
         return {}
     return {"Authorization": f"Bearer {value}"}
 

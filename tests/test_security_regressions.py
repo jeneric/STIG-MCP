@@ -49,7 +49,8 @@ import zipfile
 import pytest
 from defusedxml.common import DefusedXmlException
 
-from stig_mcp.ingest import catalog, config, fetch, inventory, library, upstream
+from stig_mcp import github_auth
+from stig_mcp.ingest import catalog, config, currency, fetch, inventory, library, upstream
 from stig_mcp.ingest.cci_parser import parse_cci_list
 from stig_mcp.ingest.stig_parser import parse_stig
 from stig_mcp.kb import install, releases
@@ -1489,3 +1490,58 @@ def test_upstream__failure_messages__never_contain_the_token(monkeypatch, failur
     assert "SECRET-t0k" not in str(excinfo.value)
     if isinstance(excinfo.value, upstream.UpstreamError):
         assert "GITHUB_TOKEN" in str(excinfo.value)
+
+
+_UNSENDABLE_TOKENS = {
+    "lf": "ghp_SECRETPART1\nghp_SECRETPART2",
+    "cr": "ghp_SECRETPART1\rghp_SECRETPART2",
+    "tab": "ghp_SECRETPART1\tghp_SECRETPART2",
+    "space": "ghp_SECRETPART1 ghp_SECRETPART2",
+    "non_ascii": "ghp_SECRETPART1éghp_SECRETPART2",
+}
+
+
+def _chain_text(exc):
+    texts = []
+    while exc is not None:
+        texts.append(f"{type(exc).__name__}: {exc} {exc.args!r}")
+        exc = exc.__cause__ or exc.__context__
+    return "\n".join(texts)
+
+
+def _never_opens(request, timeout=None):
+    raise AssertionError("the request was sent although the token cannot be sent")
+
+
+@pytest.mark.parametrize("value", list(_UNSENDABLE_TOKENS.values()), ids=list(_UNSENDABLE_TOKENS))
+@pytest.mark.parametrize("call", ["token", "get_json", "list_releases"])
+def test_github_token__unsendable_characters__refused_without_echoing_the_value(monkeypatch, value, call):
+    monkeypatch.setenv("GITHUB_TOKEN", value)
+    calls = {
+        "token": github_auth.token,
+        "get_json": lambda: upstream.get_json(upstream.CTID_LISTING_URL, _never_opens),
+        "list_releases": lambda: releases.list_releases(_never_opens),
+    }
+    with pytest.raises(Exception, match="GITHUB_TOKEN") as excinfo:  # noqa: PT011
+        calls[call]()
+    text = _chain_text(excinfo.value)
+    assert "SECRET" not in text
+    assert str(len(value)) not in text
+    assert "line breaks" in str(excinfo.value)
+    assert not isinstance(excinfo.value, urllib.error.HTTPError)
+
+
+@pytest.mark.parametrize("value", list(_UNSENDABLE_TOKENS.values()), ids=list(_UNSENDABLE_TOKENS))
+def test_currency_report__unsendable_token__report_never_contains_the_value(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("GITHUB_TOKEN", value)
+    report = currency.currency_report(tmp_path, opener=_never_opens)
+    assert "SECRET" not in json.dumps(report)
+    assert any("GITHUB_TOKEN" in str(entry.get("reason")) for entry in report.values())
+
+
+def test_github_token__unsendable_value__is_a_value_error_so_existing_callers_report_it():
+    assert issubclass(github_auth.InvalidGithubToken, ValueError)
+
+
+def test_github_token__surrounding_whitespace__is_stripped_not_refused():
+    assert github_auth.token({"GITHUB_TOKEN": "  ghp_abc\n"}) == "ghp_abc"
