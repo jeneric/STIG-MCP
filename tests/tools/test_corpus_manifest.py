@@ -1,8 +1,11 @@
+import copy
 import json
+import urllib.parse
 from pathlib import Path
 
 import pytest
 
+from stig_mcp.ingest import catalog
 from tools import corpus_manifest
 
 
@@ -187,3 +190,150 @@ def test_main__a_cli_invocation__writes_the_manifest_and_prints_the_tier_counts(
     captured = capsys.readouterr()
     assert str(out_path) in captured.out
     assert f"{len(manifest['entries'])} entries" in captured.out
+
+
+def _base(*entries):
+    return {"source_url": catalog.ZIP_BASE, "entries": [dict(entry) for entry in entries], "cui_skipped": 0}
+
+
+def _staged(name, size=100, sha256="aa", href=None):
+    return {"name": name, "href": href or name, "tier": corpus_manifest.BENCHMARK, "sha256": sha256, "size": size}
+
+
+def _cat(name):
+    return catalog.Entry(name=name, href=urllib.parse.quote(name), date="2026-11-01", size_bytes=None)
+
+
+def _merged(manifest, name):
+    return next(entry for entry in manifest["entries"] if entry["name"] == name)
+
+
+def test_merge__a_base_only_entry__is_kept_unchanged():
+    base = _base(_staged("U_MarkLogic_Server_v9_V3R2_STIG.zip", size=10))
+    manifest, report = corpus_manifest.merge(base, [], {})
+    assert manifest["entries"] == [_staged("U_MarkLogic_Server_v9_V3R2_STIG.zip", size=10)]
+    assert report["kept"] == 1
+
+
+def test_merge__a_new_catalog_name__is_added_tiered_with_no_checksum():
+    manifest, report = corpus_manifest.merge(_base(), [_cat("U_Kubernetes_V2R6_STIG.zip")], {})
+    assert manifest["entries"] == [
+        {
+            "name": "U_Kubernetes_V2R6_STIG.zip",
+            "href": "U_Kubernetes_V2R6_STIG.zip",
+            "tier": corpus_manifest.BENCHMARK,
+            "sha256": None,
+            "size": None,
+        }
+    ]
+    assert report["added"] == ["U_Kubernetes_V2R6_STIG.zip"]
+
+
+def test_merge__a_shared_name_whose_length_changed__clears_sha256_and_size():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    manifest, report = corpus_manifest.merge(_base(_staged(name)), [_cat(name)], {name: 101})
+    entry = _merged(manifest, name)
+    assert entry["sha256"] is None
+    assert entry["size"] is None
+    assert report["restaged"] == [name]
+    assert report["added"] == []
+
+
+def test_merge__a_shared_name_whose_length_matches__keeps_sha256_and_size():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    manifest, report = corpus_manifest.merge(_base(_staged(name)), [_cat(name)], {name: 100})
+    assert _merged(manifest, name) == _staged(name)
+    assert report["restaged"] == []
+
+
+def test_merge__a_shared_name_never_staged__is_kept_with_no_restage():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    unstaged = _staged(name, size=None, sha256=None)
+    manifest, report = corpus_manifest.merge(_base(unstaged), [_cat(name)], {})
+    assert _merged(manifest, name) == unstaged
+    assert report["restaged"] == []
+
+
+def test_merge__a_shared_name_with_a_space__keeps_the_base_href():
+    name = "U_July 2024 Quarterly Release Automated Benchmarks.zip"
+    href = "U_July%202024%20Quarterly%20Release%20Automated%20Benchmarks.zip"
+    base = _base(_staged(name, href=href))
+    manifest, _report = corpus_manifest.merge(base, [_cat(name)], {name: 100})
+    assert _merged(manifest, name)["href"] == href
+
+
+def test_merge__a_cui_catalog_name__is_skipped_and_counted():
+    manifest, report = corpus_manifest.merge(_base(), [_cat("CUI_Restricted_V1R1_STIG.zip")], {})
+    assert manifest["entries"] == []
+    assert manifest["cui_skipped"] == 1
+    assert report["added"] == []
+
+
+def test_merge__a_non_archive_catalog_name__is_left_out():
+    manifest, report = corpus_manifest.merge(_base(), [_cat("RPM-GPG-KEY-SCC-5.11")], {})
+    assert manifest["entries"] == []
+    assert report["added"] == []
+
+
+def test_merge__unsorted_inputs__writes_entries_sorted_by_name():
+    base = _base(_staged("U_Zebra_V1R1_STIG.zip"), _staged("U_Beta_V1R1_STIG.zip"))
+    catalog_entries = [_cat("U_Yak_V1R1_STIG.zip"), _cat("U_Alpha_V1R1_STIG.zip")]
+    manifest, _report = corpus_manifest.merge(base, catalog_entries, {})
+    assert [entry["name"] for entry in manifest["entries"]] == [
+        "U_Alpha_V1R1_STIG.zip",
+        "U_Beta_V1R1_STIG.zip",
+        "U_Yak_V1R1_STIG.zip",
+        "U_Zebra_V1R1_STIG.zip",
+    ]
+
+
+def test_merge__a_restage__does_not_mutate_the_base():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    base = _base(_staged(name))
+    before = copy.deepcopy(base)
+    corpus_manifest.merge(base, [_cat(name), _cat("U_Kubernetes_V2R6_STIG.zip")], {name: 101})
+    assert base == before
+
+
+def test_merge__the_base_source_url__is_carried_over():
+    manifest, _report = corpus_manifest.merge(_base(), [], {})
+    assert manifest["source_url"] == catalog.ZIP_BASE
+
+
+class _HeadResponse:
+    def __init__(self, length):
+        self.headers = {"Content-Length": str(length)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _recording_opener(seen, length=7):
+    def opener(request, timeout=None):
+        seen.append(request)
+        return _HeadResponse(length)
+
+    return opener
+
+
+def test_measure__only_staged_shared_names__are_requested():
+    staged, unstaged, new = "U_RHEL_9_V2R10_STIG.zip", "U_TOSS_4_V2R2_STIG.zip", "U_Kubernetes_V2R6_STIG.zip"
+    base = _base(_staged(staged, size=5), _staged(unstaged, size=None, sha256=None))
+    seen, sleeps = [], []
+    lengths = corpus_manifest.measure(
+        [_cat(staged), _cat(unstaged), _cat(new)], base, _recording_opener(seen), sleep=sleeps.append
+    )
+    assert lengths == {staged: 7}
+    assert [request.full_url for request in seen] == [catalog.ZIP_BASE + staged]
+    assert sleeps == [1.0]
+
+
+def test_measure__the_request__carries_the_corpus_tool_user_agent():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    seen = []
+    corpus_manifest.measure([_cat(name)], _base(_staged(name)), _recording_opener(seen), sleep=lambda _s: None)
+    assert seen[0].get_method() == "HEAD"
+    assert seen[0].get_header("User-agent") == corpus_manifest.USER_AGENT

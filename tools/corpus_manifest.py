@@ -6,6 +6,7 @@ run reproducible and resumable against one revision of it."""
 
 import argparse
 import json
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urljoin
@@ -18,6 +19,7 @@ from stig_mcp.ingest.catalog import (  # noqa: F401
     COMPILATION,
     JUNK,
     fetch_listing,
+    head_length,
     tier_of,
 )
 
@@ -82,6 +84,65 @@ def build_manifest(source_url, entries):
             continue
         manifested.append({"name": name, "href": href, "tier": tier, "sha256": None, "size": None})
     return {"source_url": source_url, "entries": manifested, "cui_skipped": cui_skipped}
+
+
+def measure(entries, base, open_url, sleep=time.sleep, delay=1.0):
+    """The live length of every catalog entry the base has already staged, by HEAD request.
+
+    Only a staged entry has a recorded size to compare, so nothing else is requested. Each
+    request pays the same politeness delay the stager does."""
+    staged = {entry["name"] for entry in base["entries"] if entry["size"] is not None}
+    lengths = {}
+    for entry in entries:
+        if entry.name not in staged:
+            continue
+        sleep(delay)
+        lengths[entry.name] = head_length(entry, open_url, user_agent=USER_AGENT)
+    return lengths
+
+
+def _tiered(entry):
+    """A manifest entry for a catalog name, None for a non-archive, ValueError for CUI_."""
+    tier = tier_of(entry.name)
+    if tier is None:
+        return None
+    return {"name": entry.name, "href": entry.href, "tier": tier, "sha256": None, "size": None}
+
+
+def merge(base, entries, lengths):
+    """The base manifest plus every catalog name it lacks, as (manifest, report).
+
+    Every base entry is kept, listed or not, because the corpus replays history the catalog
+    no longer carries. A staged entry whose live length differs from its recorded size is a
+    same-name reissue, so its checksum is cleared and the stager downloads it again. A
+    reissue of exactly the same size is not detected."""
+    merged = {entry["name"]: dict(entry) for entry in base["entries"]}
+    report = {"kept": len(merged), "added": [], "restaged": []}
+    for name, length in lengths.items():
+        entry = merged.get(name)
+        if entry is not None and entry["size"] is not None and entry["size"] != length:
+            entry["sha256"] = entry["size"] = None
+            report["restaged"].append(name)
+    cui_skipped = 0
+    for entry in entries:
+        if entry.name in merged:
+            continue
+        try:
+            added = _tiered(entry)
+        except ValueError:
+            cui_skipped += 1
+            continue
+        if added is not None:
+            merged[entry.name] = added
+            report["added"].append(entry.name)
+    report["added"].sort()
+    report["restaged"].sort()
+    manifest = {
+        "source_url": base["source_url"],
+        "entries": [merged[name] for name in sorted(merged)],
+        "cui_skipped": cui_skipped,
+    }
+    return manifest, report
 
 
 def write_manifest(manifest, path):
