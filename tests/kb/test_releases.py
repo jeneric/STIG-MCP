@@ -8,7 +8,7 @@ import urllib.request
 import pytest
 import truststore
 
-from stig_mcp import tls
+from stig_mcp import github_auth, tls
 from stig_mcp.kb import releases
 from stig_mcp.kb.releases import ReleaseError
 from tests.kb.fake_github import FakeGitHub, http_error
@@ -501,3 +501,84 @@ def test_list_releases__no_opener_given__opens_through_the_truststore_opener(mon
     monkeypatch.setattr(tls, "opener", _refusing_opener)
     with pytest.raises(_Reached, match="api.github.com"):
         releases.list_releases()
+
+
+def _recording_opener(github, seen):
+    def opener(request, timeout=None):
+        seen.append(request)
+        return github(request, timeout)
+
+    return opener
+
+
+def test_list_releases__github_token_set__sends_it_to_the_api(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    seen = []
+    releases.list_releases(_recording_opener(FakeGitHub(), seen))
+    assert seen[0].get_header("Authorization") == "Bearer t0k"
+
+
+def test_list_releases__github_token_unset__sends_no_authorization(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    seen = []
+    releases.list_releases(_recording_opener(FakeGitHub(), seen))
+    assert not seen[0].has_header("Authorization")
+    assert seen[0].header_items() == [("User-agent", "stig-mcp"), ("Accept", releases.GITHUB_ACCEPT)]
+
+
+def test_download_to__github_token_set__sends_no_authorization_to_the_download_url(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    github = FakeGitHub()
+    github.publish("kb-2026-10-04", b"sqlite bytes")
+    release = releases.list_releases(github)[0]
+    seen = []
+    releases.download_to(release.url(release.kb_asset), tmp_path / "kb.xz", _recording_opener(github, seen))
+    assert not seen[0].has_header("Authorization")
+
+
+def test_default_opener__holds_the_auth_stripping_redirect_handler():
+    assert issubclass(releases._AllowlistRedirects, github_auth.StripAuthOffApi)
+
+
+def test_allowlist_redirects__token_request_redirected_off_the_api__drops_authorization():
+    handler = releases._AllowlistRedirects()
+    request = urllib.request.Request(releases.LISTING_URL, headers={"Authorization": "Bearer t0k"})  # noqa: S310
+    newurl = "https://release-assets.githubusercontent.com/x"
+    result = handler.redirect_request(request, None, 302, "Found", {}, newurl)
+    assert not result.has_header("Authorization")
+
+
+def test_explain__rate_limited_without_token__names_github_token_once_and_the_limit_once(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    exc = http_error(releases.LISTING_URL, 403, {"X-RateLimit-Remaining": "0"})
+    message = releases.explain(exc, releases.LISTING_URL)
+    assert "Set GITHUB_TOKEN" in message
+    assert message.count("unauthenticated") == 1
+    assert "exhausted" not in message
+    assert releases.OFFLINE in message
+
+
+def test_explain__rate_limited_with_token__reports_the_token_limit_not_to_set_it(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "SECRET-t0k")
+    exc = http_error(releases.LISTING_URL, 403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1790559566"})
+    message = releases.explain(exc, releases.LISTING_URL)
+    assert "rate limit for your GITHUB_TOKEN is used up" in message
+    assert "resets at 2026-09-28" in message
+    assert "Set GITHUB_TOKEN" not in message
+    assert "SECRET-t0k" not in message
+    assert releases.OFFLINE in message
+
+
+def test_explain__401_with_token__says_the_token_was_rejected(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "SECRET-t0k")
+    message = releases.explain(http_error(releases.LISTING_URL, 401), releases.LISTING_URL)
+    assert "GitHub rejected GITHUB_TOKEN" in message
+    assert "${GITHUB_TOKEN}" in message
+    assert "SECRET-t0k" not in message
+
+
+def test_explain__401_without_token__keeps_the_plain_status_message(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    message = releases.explain(http_error(releases.LISTING_URL, 401), releases.LISTING_URL)
+    assert "HTTP 401" in message
+    assert "GITHUB_TOKEN" not in message

@@ -1446,3 +1446,25 @@ def test_decide__a_draft_whose_tag_is_not_a_kb_tag__is_never_scheduled_for_delet
     ]
     decision = kb_release.decide(listing, 10, "schedule", None, "2026-10-05", "0.1.0")
     assert decision["delete_drafts"] == [1]
+
+
+_TOKEN_CASES = {
+    "rate_limited": http_error(releases.LISTING_URL, 403, {"X-RateLimit-Remaining": "0"}),
+    "unauthorized": http_error(releases.LISTING_URL, 401),
+    "not_found": http_error(releases.LISTING_URL, 404),
+    "unreachable": urllib.error.URLError(OSError("connection refused")),
+    "tls": urllib.error.URLError(ssl.SSLError("handshake failed")),
+}
+
+
+@pytest.mark.parametrize("failure", list(_TOKEN_CASES.values()), ids=list(_TOKEN_CASES))
+def test_releases__every_failure_message__never_contains_the_token(monkeypatch, failure):
+    monkeypatch.setenv("GITHUB_TOKEN", "SECRET-t0k")
+
+    def failing_opener(request, timeout=None):
+        raise failure
+
+    with pytest.raises(releases.ReleaseError) as excinfo:
+        releases.list_releases(failing_opener)
+    assert "SECRET-t0k" not in str(excinfo.value)
+    assert "SECRET-t0k" not in releases.explain(failure, releases.LISTING_URL)

@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from stig_mcp import tls
+from stig_mcp import github_auth, tls
 
 REPOSITORY = "jeneric/STIG-MCP"
 LISTING_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
@@ -191,6 +191,7 @@ KB_DOWNLOAD_CAP = 64 * 1024 * 1024
 CHUNK = 1024 * 1024
 _QUOTE_LIMIT = 120
 _HTTP_NOT_FOUND = 404
+_HTTP_UNAUTHORIZED = 401
 _API_PATH = f"/repos/{REPOSITORY}/releases"
 _DOWNLOAD_PATH = f"/{REPOSITORY}/releases/download/"
 # 10 digits is generous through the year 2286; a longer or non-ASCII-digit value is never a real
@@ -232,7 +233,7 @@ def require_allowed(url):
         )
 
 
-class _AllowlistRedirects(urllib.request.HTTPRedirectHandler):
+class _AllowlistRedirects(github_auth.StripAuthOffApi):
     # Signature fixed by the base class being overridden, not by choice.
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: PLR0913
         try:
@@ -259,19 +260,30 @@ def _reset_time(reset):
         return None
 
 
+def _explain_http(exc, url):
+    token_sent = bool(github_auth.auth_headers(url))
+    if github_auth.rate_limited(exc):
+        when = _reset_time(exc.headers.get("X-RateLimit-Reset"))
+        resets = f"it resets at {when}" if when else "it resets within the hour"
+        if token_sent:
+            return f"The rate limit for your GITHUB_TOKEN is used up; {resets}. {OFFLINE}"
+        return (
+            f"GitHub's limit of 60 unauthenticated requests per hour from this address is used up; "
+            f"{resets}. {github_auth.RATE_LIMIT_HINT} {OFFLINE}"
+        )
+    if exc.code == _HTTP_UNAUTHORIZED and token_sent:
+        return (
+            f"GitHub rejected GITHUB_TOKEN with HTTP 401. Replace it with a valid token or unset it; "
+            f"an unexpanded ${{GITHUB_TOKEN}} placeholder in an MCP client config is one cause. {OFFLINE}"
+        )
+    return f"{_quoted(url)} answered HTTP {exc.code}. {OFFLINE}"
+
+
 def explain(exc, url):
     """What went wrong reaching url, for the caller, always ending with the offline route."""
     host = urllib.parse.urlsplit(url).hostname
     if isinstance(exc, urllib.error.HTTPError):
-        headers = exc.headers or {}
-        if exc.code in (403, 429) and headers.get("X-RateLimit-Remaining") == "0":
-            when = _reset_time(headers.get("X-RateLimit-Reset"))
-            resets = f"it resets at {when}" if when else "it resets within the hour"
-            return (
-                f"GitHub's limit of 60 unauthenticated requests per hour from this address is used up; "
-                f"{resets}. {OFFLINE}"
-            )
-        return f"{_quoted(url)} answered HTTP {exc.code}. {OFFLINE}"
+        return _explain_http(exc, url)
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
     if isinstance(reason, ssl.SSLError):
         return (
@@ -286,7 +298,7 @@ def explain(exc, url):
 
 def _open(url, opener, accept=None):
     require_allowed(url)
-    headers = {"User-Agent": USER_AGENT, **({"Accept": accept} if accept else {})}
+    headers = {"User-Agent": USER_AGENT, **({"Accept": accept} if accept else {}), **github_auth.auth_headers(url)}
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 (require_allowed checked scheme and host)
     try:
         response = (opener or default_opener())(request, timeout=TIMEOUT)

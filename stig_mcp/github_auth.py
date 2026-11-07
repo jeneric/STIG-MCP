@@ -12,8 +12,8 @@ from urllib.parse import urlsplit
 API_HOST = "api.github.com"
 
 RATE_LIMIT_HINT = (
-    "GitHub's unauthenticated API limit is exhausted. Set GITHUB_TOKEN to a fine-grained "
-    "token with public read-only access to raise the limit to 5,000 per hour; see "
+    "Set GITHUB_TOKEN to a fine-grained token with public read-only access to raise the "
+    "limit to 5,000 per hour; see "
     'docs/install.md, "GitHub\'s rate limit".'
 )
 
