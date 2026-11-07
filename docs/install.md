@@ -274,7 +274,12 @@ it from `GITHUB_TOKEN` and sends it only to `api.github.com`, over https.
 For the command-line tools, export it for the session, or set it for one command:
 
     export GITHUB_TOKEN=github_pat_...
-    GITHUB_TOKEN="$(gh auth token)" uvx --from stig-mcp stig-mcp-install-kb
+    GITHUB_TOKEN=github_pat_... uvx --from stig-mcp stig-mcp-install-kb
+
+`gh` also reads `GITHUB_TOKEN`, and prefers it to its stored login. After you export it, `gh`
+commands in that shell use this limited token and may fail; set it for one command, or unset
+it, to avoid that. Do not fill it from `gh auth token`: that is `gh`'s own token, which is
+broader than the read-only one recommended above.
 
 For the server under Claude Code, store it in your user configuration:
 
@@ -284,15 +289,24 @@ Never add `--scope project` with a literal token: project scope writes `.mcp.jso
 project root, which is usually committed.
 
 For a client configured with JSON, take the value from your environment instead of writing it
-in the file, by adding this line to the server's `env`:
+in the file. In Claude Code's `.mcp.json`, add this line to the server's `env`:
 
     "GITHUB_TOKEN": "${GITHUB_TOKEN:-}"
 
-This form needs a client that expands variables, as Claude Code does. Keep the `:-`. In
-Claude Code, a bare `${GITHUB_TOKEN}` that is unset reaches the server as that literal text.
-With `:-` an unset variable becomes an empty value, which stig-mcp treats as no token. A
-client that does not expand variables would send the text as it is, so check its documentation,
-and never put a literal token in a file that is committed.
+Keep the `:-`. In Claude Code, a bare `${GITHUB_TOKEN}` that is unset reaches the server as
+that literal text. With `:-` an unset variable becomes an empty value, which stig-mcp treats as
+no token.
+
+In VS Code's workspace or profile `mcp.json`, the documented form is `${env:NAME}`:
+
+    "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+
+VS Code's documentation does not say what it passes when the variable is unset, so add this
+entry only when `GITHUB_TOKEN` is set in the environment VS Code starts from. See
+https://code.visualstudio.com/docs/copilot/reference/mcp-configuration.
+
+Another client may not expand variables at all and would send the text as it is, so check its
+documentation, and never put a literal token in a file that is committed.
 
 ### The GitHub source archive stops downloading partway
 

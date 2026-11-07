@@ -174,6 +174,17 @@ def test_tls_proxy_workflow__github_token_step__masks_the_token_first():
     assert _unproxied_install_step()["run"].startswith('echo "::add-mask::$GITHUB_TOKEN"\n')
 
 
+def test_tls_proxy_workflow__raw_text__names_github_token_exactly_once():
+    assert WORKFLOW.read_text().count("github.token") == 1
+
+
+def test_tls_proxy_workflow__macos_install_step__runs_only_the_mask_and_the_install():
+    assert _unproxied_install_step()["run"].splitlines() == [
+        'echo "::add-mask::$GITHUB_TOKEN"',
+        "uv run --no-sync stig-mcp-install-kb",
+    ]
+
+
 def test_tls_proxy_workflow__no_step__writes_github_token_to_github_env():
     runs = [step.get("run", "") for _, step in _steps()]
     assert any("GITHUB_ENV" in run for run in runs), "no step writes GITHUB_ENV, so nothing was checked"
