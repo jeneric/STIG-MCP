@@ -52,8 +52,12 @@ earlier (`--base`) and adds every name the catalog lists that the base lacks. Ba
 catalog no longer lists are kept, since the harness replays that history. For each file the
 base has already staged, the tool sends one HEAD request, one second apart, which takes a few
 minutes. A file whose size has changed is a same-name reissue: it loses its recorded checksum,
-so `corpus_fetch` downloads it again, and the tool names it. The base file is never modified,
-and `--out` refuses its path:
+so `corpus_fetch` downloads it again, and the tool names it. Every base entry is re-tiered by
+today's rules, and any whose tier changed is named too. The base file is never modified, and
+`--out` refuses its path. No base ships with the repository: without one recorded earlier,
+start from a file holding `{"source_url": "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/", "entries": []}`,
+which yields a manifest of the catalog's current files only, without the historical
+libraries:
 
     uv run python -m tools.corpus_manifest --base /tmp/corpus/2026-08-02/manifest.json \
         --out /tmp/corpus/manifest.json

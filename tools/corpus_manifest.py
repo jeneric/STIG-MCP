@@ -7,6 +7,8 @@ that once named every file, and the cyber.mil catalog names only current ones, s
 manifest is a recorded base plus whatever the catalog adds."""
 
 import argparse
+import functools
+import http.client
 import json
 import time
 from pathlib import Path
@@ -27,6 +29,7 @@ from stig_mcp.ingest.catalog import (  # noqa: F401
     parse_catalog,
     tier_of,
 )
+from stig_mcp.ingest.fetch import _with_retry
 
 USER_AGENT = "stig-mcp-corpus-tool (+https://github.com/jeneric/STIG-MCP)"
 
@@ -42,8 +45,20 @@ def measure(entries, base, open_url, sleep=time.sleep, delay=1.0):
         if entry.name not in staged:
             continue
         sleep(delay)
-        lengths[entry.name] = head_length(entry, open_url, user_agent=USER_AGENT)
+        lengths[entry.name] = _head_with_retry(entry, open_url, sleep)
     return lengths
+
+
+def _head_with_retry(entry, open_url, sleep):
+    """head_length under the shipped fetch's bounded retry, naming the file on a final failure."""
+    call = functools.partial(head_length, entry, open_url, user_agent=USER_AGENT)
+    try:
+        return _with_retry(call, entry.name, sleep)
+    except (OSError, http.client.HTTPException) as error:
+        raise RuntimeError(
+            f"The HEAD request for {entry.name} failed ({error}). Nothing was written and the base "
+            f"is unchanged; rerun once {ZIP_BASE} answers for that file."
+        ) from error
 
 
 def _tiered(entry):
@@ -54,21 +69,40 @@ def _tiered(entry):
     return {"name": entry.name, "href": entry.href, "tier": tier, "sha256": None, "size": None}
 
 
+def _carry_base(base):
+    """Every base entry re-tiered by today's rules, as (entries by name, retiered, cui_skipped).
+
+    A recorded tier is only what the rules said when the base was written, and the stager
+    selects by tier, so a stale one would stage the wrong files. An entry the rules no longer
+    class as an archive is dropped; retiered lists (name, old tier, new tier or None)."""
+    carried, retiered, cui_skipped = {}, [], 0
+    for entry in base["entries"]:
+        try:
+            tier = tier_of(entry["name"])
+        except ValueError:
+            cui_skipped += 1
+            continue
+        if tier != entry["tier"]:
+            retiered.append((entry["name"], entry["tier"], tier))
+        if tier is not None:
+            carried[entry["name"]] = {**entry, "tier": tier}
+    return carried, sorted(retiered), cui_skipped
+
+
 def merge(base, entries, lengths):
     """The base manifest plus every catalog name it lacks, as (manifest, report).
 
     Every base entry is kept, listed or not, because the corpus replays history the catalog
-    no longer carries. A staged entry whose live length differs from its recorded size is a
-    same-name reissue, so its checksum is cleared and the stager downloads it again. A
-    reissue of exactly the same size is not detected."""
-    merged = {entry["name"]: dict(entry) for entry in base["entries"]}
-    report = {"kept": len(merged), "added": [], "restaged": []}
+    no longer carries, but under the tier today's rules give it. A staged entry whose live
+    length differs from its recorded size is a same-name reissue, so its checksum is cleared
+    and the stager downloads it again. A reissue of exactly the same size is not detected."""
+    merged, retiered, cui_skipped = _carry_base(base)
+    report = {"kept": len(merged), "added": [], "restaged": [], "retiered": retiered}
     for name, length in lengths.items():
         entry = merged.get(name)
         if entry is not None and entry["size"] is not None and entry["size"] != length:
             entry["sha256"] = entry["size"] = None
             report["restaged"].append(name)
-    cui_skipped = 0
     for entry in entries:
         if entry.name in merged:
             continue
@@ -98,7 +132,7 @@ def write_manifest(manifest, path):
 
 
 def entry_url(manifest, entry):
-    """The absolute URL for a manifest entry, joining its href to the listing URL."""
+    """The absolute URL for a manifest entry, joining its href to the source URL."""
     return urljoin(manifest["source_url"], entry["href"])
 
 
@@ -135,11 +169,14 @@ def main():
         counts[entry["tier"]] = counts.get(entry["tier"], 0) + 1
     print(
         f"Wrote {written} with {len(manifest['entries'])} entries: {counts}; kept {report['kept']}, "
-        f"added {len(report['added'])}, re-staged {len(report['restaged'])}; "
+        f"added {len(report['added'])}, re-staged {len(report['restaged'])}, "
+        f"re-tiered {len(report['retiered'])}; "
         f"{manifest['cui_skipped']} CUI entr(y/ies) skipped (requires a DOD PKI certificate)"
     )
     for name in report["restaged"]:
         print(f"re-staged (size changed, corpus_fetch downloads it again): {name}")
+    for name, old, new in report["retiered"]:
+        print(f"re-tiered (recorded {old}, now {new or 'not an archive, dropped'}): {name}")
 
 
 if __name__ == "__main__":

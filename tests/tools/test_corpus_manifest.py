@@ -1,5 +1,6 @@
 import copy
 import json
+import urllib.error
 import urllib.parse
 
 import pytest
@@ -117,12 +118,33 @@ def test_merge__a_shared_name_never_staged__is_kept_with_no_restage():
     assert report["restaged"] == []
 
 
-def test_merge__a_shared_name_with_a_space__keeps_the_base_href():
+def test_merge__a_shared_name_the_catalog_spells_differently__keeps_the_base_href():
+    # The two hrefs must differ, or replacing the base href with the catalog's would go unseen.
     name = "U_July 2024 Quarterly Release Automated Benchmarks.zip"
     href = "U_July%202024%20Quarterly%20Release%20Automated%20Benchmarks.zip"
-    base = _base(_staged(name, href=href))
-    manifest, _report = corpus_manifest.merge(base, [_cat(name)], {name: 100})
+    other = catalog.Entry(name=name, href="U_July+2024+Quarterly.zip", date="2026-11-01", size_bytes=None)
+    manifest, _report = corpus_manifest.merge(_base(_staged(name, href=href)), [other], {name: 100})
     assert _merged(manifest, name)["href"] == href
+
+
+def test_merge__a_base_entry_the_tier_rules_now_class_differently__is_retiered_keeping_its_checksum():
+    name = "U_STIGViewer-linux_x64-3-7-0.zip"
+    manifest, report = corpus_manifest.merge(_base(_staged(name)), [], {})
+    assert _merged(manifest, name) == {**_staged(name), "tier": corpus_manifest.JUNK}
+    assert report["retiered"] == [(name, corpus_manifest.BENCHMARK, corpus_manifest.JUNK)]
+
+
+def test_merge__a_base_entry_that_is_no_longer_an_archive__is_dropped_and_reported():
+    name = "RPM-GPG-KEY-SCC-5.11"
+    manifest, report = corpus_manifest.merge(_base(_staged(name)), [], {})
+    assert manifest["entries"] == []
+    assert report["retiered"] == [(name, corpus_manifest.BENCHMARK, None)]
+
+
+def test_merge__a_cui_base_entry__is_dropped_and_counted():
+    manifest, _report = corpus_manifest.merge(_base(_staged("CUI_Restricted_V1R1_STIG.zip")), [], {})
+    assert manifest["entries"] == []
+    assert manifest["cui_skipped"] == 1
 
 
 def test_merge__a_cui_catalog_name__is_skipped_and_counted():
@@ -192,6 +214,30 @@ def test_measure__only_staged_shared_names__are_requested():
     assert lengths == {staged: 7}
     assert [request.full_url for request in seen] == [catalog.ZIP_BASE + staged]
     assert sleeps == [1.0]
+
+
+def _failing_opener(codes):
+    """An opener that raises an HTTPError per code in turn, then answers a length of 7."""
+    pending = list(codes)
+
+    def opener(request, timeout=None):
+        if pending:
+            raise urllib.error.HTTPError(request.full_url, pending.pop(0), "refused", {}, None)
+        return _HeadResponse(7)
+
+    return opener
+
+
+def test_measure__a_head_refused_by_the_server__names_the_file():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    with pytest.raises(RuntimeError, match=name):
+        corpus_manifest.measure([_cat(name)], _base(_staged(name)), _failing_opener([404]), sleep=lambda _s: None)
+
+
+def test_measure__a_transient_head_failure__is_retried():
+    name = "U_RHEL_9_V2R10_STIG.zip"
+    lengths = corpus_manifest.measure([_cat(name)], _base(_staged(name)), _failing_opener([503]), sleep=lambda _s: None)
+    assert lengths == {name: 7}
 
 
 def test_measure__the_request__carries_the_corpus_tool_user_agent():
@@ -310,3 +356,11 @@ def test_main__a_head_fails_partway__writes_nothing_and_names_the_file(monkeypat
         _run_main(monkeypatch, tmp_path, base, ["U_A_V1R1_STIG.zip", "U_X_V1R1_STIG.zip"])
     assert calls == ["U_A_V1R1_STIG.zip", "U_X_V1R1_STIG.zip"]
     assert not (tmp_path / "out.json").exists()
+
+
+def test_main__a_stale_base_tier__is_counted_and_named_in_the_output(monkeypatch, tmp_path, capsys):
+    base = _base(_staged("U_STIGViewer-linux_x64-3-7-0.zip"))
+    _run_main(monkeypatch, tmp_path, base, ["U_Kubernetes_V2R6_STIG.zip"])
+    printed = capsys.readouterr().out
+    assert "re-tiered 1" in printed
+    assert "re-tiered (recorded benchmark, now junk): U_STIGViewer-linux_x64-3-7-0.zip" in printed
