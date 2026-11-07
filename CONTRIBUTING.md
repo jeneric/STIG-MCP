@@ -45,11 +45,18 @@ historical SRG-STIG Library releases plus the Rev 4 sunset archive. The harness 
 build per library, nine builds today, each paired with the sunset archive (see below), so a
 full run means nine complete passes of the ingest pipeline over the product corpus.
 
-Four commands, run in order. The manifest step comes first because it downloads nothing;
-it only tiers the published listing. DISA's directory listing is closed, so
-`tools.corpus_manifest` cannot read the live server at present:
+Four commands, run in order. The manifest step comes first because it downloads no
+archives. DISA has closed the directory listing that once named every file, and the cyber.mil
+catalog names only current ones, so `tools.corpus_manifest` starts from a manifest recorded
+earlier (`--base`) and adds every name the catalog lists that the base lacks. Base entries the
+catalog no longer lists are kept, since the harness replays that history. For each file the
+base has already staged, the tool sends one HEAD request, one second apart, which takes a few
+minutes. A file whose size has changed is a same-name reissue: it loses its recorded checksum,
+so `corpus_fetch` downloads it again, and the tool names it. The base file is never modified,
+and `--out` refuses its path:
 
-    uv run python -m tools.corpus_manifest --out /tmp/corpus/manifest.json
+    uv run python -m tools.corpus_manifest --base /tmp/corpus/2026-08-02/manifest.json \
+        --out /tmp/corpus/manifest.json
     uv run python -m tools.corpus_fetch --manifest /tmp/corpus/manifest.json --dest /tmp/corpus/files
     uv run python -m tools.corpus_fetch --manifest /tmp/corpus/manifest.json \
         --dest /tmp/corpus/compilations --tier compilation

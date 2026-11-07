@@ -255,11 +255,6 @@ def test_head_length__content_length_missing__names_the_file(headers):
         catalog.head_length(_entry(), _head_opener(headers, []))
 
 
-def test_fetch_listing__a_non_web_scheme__is_refused():
-    with pytest.raises(ValueError, match="http/https"):
-        catalog.fetch_listing("file:///etc/passwd")
-
-
 def test_tier_of__the_saved_response__classifies_the_known_tiers():
     tiers = {e.name: catalog.tier_of(e.name) for e in catalog.parse_catalog(CATALOG)}
     assert tiers["U_SRG-STIG_Library_October_2026.zip"] == catalog.COMPILATION
@@ -436,32 +431,6 @@ def test_newest_per_product__scap_and_ansible_variants__are_excluded():
         "U_MS_Windows_Server_2019_V1R2_STIG_Ansible.zip",
     )
     assert [e.name for e in catalog.newest_per_product(entries)] == ["U_MS_Windows_Server_2019_V3R9_STIG.zip"]
-
-
-def test_fetch_listing__a_web_url__sends_a_named_user_agent_and_a_timeout():
-    seen = {}
-
-    class _Response:
-        def read(self):
-            return b"the page body"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    def opener(request, timeout=None):
-        seen["url"] = request.full_url
-        seen["agent"] = request.get_header("User-agent")
-        seen["timeout"] = timeout
-        return _Response()
-
-    text = catalog.fetch_listing("https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/", opener=opener)
-    assert text == "the page body"
-    assert seen["url"] == "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
-    assert seen["agent"] == "stig-mcp"
-    assert seen["timeout"] == 60
 
 
 def test_release_of__both_version_schemes_and_a_nameless_one__reports_scheme_position_and_ordinal():

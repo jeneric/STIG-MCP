@@ -1,10 +1,10 @@
 """What DISA publishes right now, read from the cyber.mil document catalog.
 
-Imports no database module and nothing that downloads archives. The only project imports,
-require_web_url and require_bare_name from fetch, are the shared URL and name guards, not a
-download path. Selection is decided here and downloading happens elsewhere, so this half is
-testable against a saved response with no network and no database, and build_kb stays offline.
-The network calls are fetch_catalog, head_length and fetch_listing.
+Imports no database module and nothing that downloads archives. The only import from fetch,
+require_bare_name, is the shared name guard, not a download path. Selection is decided here
+and downloading happens elsewhere, so this half is testable against a saved response with no
+network and no database, and build_kb stays offline.
+The network calls are fetch_catalog and head_length.
 """
 
 import json
@@ -15,7 +15,7 @@ import urllib.request
 from typing import NamedTuple
 
 from stig_mcp import tls
-from stig_mcp.ingest.fetch import require_bare_name, require_web_url
+from stig_mcp.ingest.fetch import require_bare_name
 
 ZIP_BASE = "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/"
 # The path DISA's zips sit under on ZIP_BASE's host and on the S3 bucket mirroring it.
@@ -369,12 +369,3 @@ def head_length(entry, open_url, user_agent=USER_AGENT):
             f"a HEAD request to {url}. Size cannot be read from this file; check that the URL "
             f"still serves it."
         ) from error
-
-
-def fetch_listing(url, opener=None, user_agent=USER_AGENT):
-    """A page at url as text, for tools/corpus_manifest."""
-    require_web_url(url)
-    request = urllib.request.Request(url, headers={"User-Agent": user_agent})  # noqa: S310  scheme confined by require_web_url above
-    open_url = opener or tls.opener()
-    with open_url(request, timeout=_TIMEOUT) as response:
-        return response.read().decode("utf-8", errors="replace")
