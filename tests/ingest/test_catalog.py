@@ -468,3 +468,10 @@ def test_fetch_catalog__no_opener_given__opens_through_the_truststore_opener(mon
     monkeypatch.setattr(tls, "opener", _refusing_opener)
     with pytest.raises(_Reached, match=re.escape(catalog.CATALOG_URL)):
         catalog.fetch_catalog()
+
+
+def test_parse_catalog__a_link_with_a_malformed_ipv6_host__refuses_naming_the_link():
+    bad = "https://[dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_Foo_V1R1_STIG.zip"
+    good = catalog.ZIP_BASE + "U_Kubernetes_V2R6_STIG.zip"
+    with pytest.raises(RuntimeError, match=re.escape(bad)):
+        catalog.parse_catalog(_body(_row(good), _row(bad)))

@@ -64,9 +64,16 @@ def _zip_name(link):
     any other host yields what follows the zip path in it, which is how DISA links a file
     through its S3 mirror; only that name is kept, never the host. Everything after the prefix
     is returned whole, separators included, so require_bare_name sees a ../ step rather than
-    a basename that hid it.
+    a basename that hid it. A link that is not a valid URL raises RuntimeError naming it.
     """
-    parts = urllib.parse.urlsplit(link)
+    try:
+        parts = urllib.parse.urlsplit(link)
+    except ValueError as error:
+        raise RuntimeError(
+            f"The cyber.mil catalog lists a DownloadLink that is not a valid URL ({error}): {link}. "
+            f"Nothing can say which file it names, so the run stops rather than drop it unseen; "
+            f"rerun once DISA corrects that catalog row."
+        ) from error
     path = re.sub(r"/{2,}", "/", parts.path)
     collapsed = urllib.parse.urlunsplit(parts._replace(path=path))
     if collapsed.startswith(ZIP_BASE):
