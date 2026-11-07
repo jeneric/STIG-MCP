@@ -184,6 +184,19 @@ def test_require_bare_name__a_name_that_is_not_a_plain_filename__raises_ValueErr
         fetch.require_bare_name(name)
 
 
+def test_require_bare_name__a_name_carrying_a_nul__raises_ValueError_naming_the_rule():
+    # A NUL passes every path-flavor check, then fails at open() with a message that names
+    # neither the catalog nor the rule.
+    with pytest.raises(ValueError, match="plain filename"):
+        fetch.require_bare_name("U_Foo_V1R1_STIG\x00.zip")
+
+
+def test_read_manifest__a_key_carrying_a_nul__drops_that_row_and_keeps_the_rest(tmp_path):
+    body = {"entries": {"U_Foo_V1R1_STIG.zip": _row(11), "U_Foo_V1R1_STIG\x00.zip": _row(11)}}
+    (tmp_path / fetch.MANIFEST_NAME).write_text(json.dumps(body))
+    assert set(fetch.read_manifest(tmp_path)["entries"]) == {"U_Foo_V1R1_STIG.zip"}
+
+
 @pytest.mark.parametrize("name", _REAL_NAMES)
 def test_require_bare_name__a_name_the_real_index_publishes__is_accepted(name):
     fetch.require_bare_name(name)  # no exception

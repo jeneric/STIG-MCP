@@ -132,8 +132,11 @@ def _is_bare_name(name):
     PurePath("..").name differs across CPython versions ("" on some, ".." on 3.14, which the
     comparison below would accept). None lands bytes anywhere on its own, since each joins to
     a directory, but the rule must not rest on a version-dependent accident.
+
+    A NUL is refused too: it passes both flavors, and open() then fails with a message that
+    names neither the source nor this rule.
     """
-    if name in {"", ".", ".."}:
+    if name in {"", ".", ".."} or "\x00" in name:
         return False
     return PurePosixPath(name).name == name and PureWindowsPath(name).name == name
 
