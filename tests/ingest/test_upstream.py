@@ -306,3 +306,20 @@ def test_get_json__rate_limited_without_reset_header__says_it_resets_within_the_
     error = _http_error(upstream.CTID_LISTING_URL, 403, {"X-RateLimit-Remaining": "0"})
     with pytest.raises(upstream.UpstreamError, match="it resets within the hour"):
         upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+
+
+@pytest.mark.parametrize(
+    ("code", "headers"),
+    [(403, {"X-RateLimit-Remaining": "0"}), (401, {})],
+    ids=["rate_limited", "401_with_token"],
+)
+def test_get_json__replaced_http_error__closes_its_body(monkeypatch, code, headers):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    body = io.BytesIO(b"{}")
+    message = email.message.Message()
+    for name, value in headers.items():
+        message[name] = value
+    error = urllib.error.HTTPError(upstream.CTID_LISTING_URL, code, "error", message, body)
+    with pytest.raises(upstream.UpstreamError):
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+    assert body.closed
