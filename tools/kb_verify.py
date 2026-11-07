@@ -58,7 +58,7 @@ def _stored(conn):
 def tripwire(conn, published_names):
     """Each benchmark DISA publishes against what the knowledge base stores for the same product,
     scheme and major. Only stale fails the build: other_major and unmatched are notes, because
-    the library-wins rule keeps an older major DISA still publishes on purpose, and DISA keeps listing
+    the library-wins rule deliberately keeps an older major that DISA still publishes, and DISA keeps listing
     renamed products under their old names, which no stored benchmark came from."""
     held = _stored(conn)
     result = {"stale": [], "other_major": [], "unmatched": []}

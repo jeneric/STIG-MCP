@@ -200,8 +200,9 @@ from GitHub before it ever reaches DISA.
 
 #### If the catalog read fails
 
-Three errors come from reading the catalog, and each says what to check. The first two mean
-DISA changed the catalog; the third can also be this machine's access or a transient failure.
+Four errors come from reading the catalog, and each says what to check. The first three mean
+DISA changed or broke the catalog; the fourth can also be this machine's access or a transient
+failure.
 
 - **"The Apex class id changes when DISA redeploys it".** The catalog call is addressed to
   an Apex class by record id, and DISA changes that id when it redeploys the page. Update
@@ -213,6 +214,10 @@ DISA changed the catalog; the third can also be this machine's access or a trans
 - **"no zip rows".** The call worked, but no row has a `DownloadLink` under `ZIP_BASE`, or
   under that path on a mirror, ending in `.zip`. The row shape or the download location changed, not the class id: compare
   a row of the live response with `DownloadLink` and `ZIP_BASE` in the same file.
+- **"a DownloadLink that is not a valid URL".** One catalog row carries a link that does not
+  parse, such as a malformed IPv6 host, and the message quotes it. Nothing can say which file
+  it names, so the whole response is refused rather than that row dropped unseen. Nothing on
+  this side fixes it: rerun once DISA corrects the row.
 - **"HEAD ... which the cyber.mil catalog lists, failed".** The catalog lists a file, but the
   HEAD request sizing it failed. The message names the file and the URL asked, which is always
   under `ZIP_BASE`. A 404 or 410 means the catalog lists a file the download host no longer
