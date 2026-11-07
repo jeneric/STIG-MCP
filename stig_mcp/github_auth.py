@@ -5,6 +5,8 @@ headers onto a redirect, so the redirect handler here removes the token whenever
 is not the API host over https."""
 
 import os
+import re
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -16,6 +18,10 @@ RATE_LIMIT_HINT = (
     "limit to 5,000 per hour; see "
     'docs/install.md, "GitHub\'s rate limit".'
 )
+
+# 10 digits is generous through the year 2286; a longer or non-ASCII-digit value is never a real
+# reset time (GitHub sends whole seconds), so it is treated as unknown rather than passed to gmtime.
+_RESET_RE = re.compile(r"[0-9]{1,10}", re.ASCII)
 
 
 def token(environ=None):
@@ -42,6 +48,17 @@ def rate_limited(exc):
         and exc.headers is not None
         and exc.headers.get("X-RateLimit-Remaining") == "0"
     )
+
+
+def reset_time(reset):
+    """The rate-limit reset header as a UTC date and time, or None when it is absent, too long,
+    not all ASCII digits, or too large for this platform's gmtime to accept."""
+    if not _RESET_RE.fullmatch(reset or ""):
+        return None
+    try:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(reset)))
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 class StripAuthOffApi(urllib.request.HTTPRedirectHandler):

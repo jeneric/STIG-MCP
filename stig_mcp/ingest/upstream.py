@@ -108,11 +108,13 @@ def parse_attack_index(doc):
 def _explain_refusal(exc, url, token_sent):
     """The UpstreamError text for a rate-limited or token-rejected response, else None."""
     if github_auth.rate_limited(exc):
+        when = github_auth.reset_time(exc.headers.get("X-RateLimit-Reset"))
+        resets = f"it resets at {when}" if when else "it resets within the hour"
         if token_sent:
-            return f"{url} refused the request: the rate limit for your GITHUB_TOKEN is used up. Try again later."
+            return f"{url} refused the request: the rate limit for your GITHUB_TOKEN is used up; {resets}."
         return (
             f"{url} refused the request: GitHub's limit of 60 unauthenticated requests per hour "
-            f"from this address is used up. {github_auth.RATE_LIMIT_HINT}"
+            f"from this address is used up; {resets}. {github_auth.RATE_LIMIT_HINT}"
         )
     if exc.code == _HTTP_UNAUTHORIZED and token_sent:
         return (

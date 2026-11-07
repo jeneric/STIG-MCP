@@ -127,3 +127,20 @@ def test_rate_limit_hint__always__names_the_token_limit_and_docs_section():
     assert "fine-grained" in hint
     assert "docs/install.md" in hint
     assert "GitHub's rate limit" in hint
+
+
+def test_reset_time__gmtime_rejects_a_value_this_platform_cannot_hold__is_unknown(monkeypatch):
+    # A 10-digit value never overflows gmtime on Linux; simulate a platform (e.g. Windows) whose
+    # time_t range is narrower, since reset_time's except clause exists for exactly that case.
+    def raising_gmtime(value):
+        raise OverflowError("timestamp out of range for platform time_t")
+
+    monkeypatch.setattr(github_auth.time, "gmtime", raising_gmtime)
+    assert github_auth.reset_time("9999999999") is None
+
+
+def test_reset_time__millisecond_value__is_unknown_not_a_wrong_far_future_date():
+    # 13 ASCII digits parse and gmtime accepts them without raising, but as a reset time this is
+    # milliseconds, not GitHub's seconds, and would silently print a date around the year 58710
+    # if the length check did not reject it first.
+    assert github_auth.reset_time("1790559566000") is None

@@ -291,3 +291,18 @@ def test_get_json__url_error__propagates_unchanged(monkeypatch):
     with pytest.raises(urllib.error.URLError) as excinfo:
         upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
     assert excinfo.value is error
+
+
+def test_get_json__rate_limited__says_when_the_limit_resets(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    headers = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1790559566"}
+    error = _http_error(upstream.CTID_LISTING_URL, 403, headers)
+    with pytest.raises(upstream.UpstreamError, match="it resets at 2026-09-28"):
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))
+
+
+def test_get_json__rate_limited_without_reset_header__says_it_resets_within_the_hour(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "t0k")
+    error = _http_error(upstream.CTID_LISTING_URL, 403, {"X-RateLimit-Remaining": "0"})
+    with pytest.raises(upstream.UpstreamError, match="it resets within the hour"):
+        upstream.get_json(upstream.CTID_LISTING_URL, _Recorder(error=error))

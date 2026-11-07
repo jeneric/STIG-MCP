@@ -10,7 +10,6 @@ import http.client
 import json
 import re
 import ssl
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -194,9 +193,6 @@ _HTTP_NOT_FOUND = 404
 _HTTP_UNAUTHORIZED = 401
 _API_PATH = f"/repos/{REPOSITORY}/releases"
 _DOWNLOAD_PATH = f"/{REPOSITORY}/releases/download/"
-# 10 digits is generous through the year 2286; a longer or non-ASCII-digit value is never a real
-# reset time (GitHub sends whole seconds), so it is treated as unknown rather than passed to gmtime.
-_RESET_RE = re.compile(r"[0-9]{1,10}", re.ASCII)
 OFFLINE = (
     "To install without network access, download the release's .sqlite.xz and SHA256SUMS on another "
     "machine and run stig-mcp-install-kb --file PATH --sha256 HEX, or build locally with "
@@ -249,21 +245,10 @@ def default_opener():
     return tls.opener(_AllowlistRedirects)
 
 
-def _reset_time(reset):
-    """The rate-limit reset header as a UTC date and time, or None when it is absent, too long,
-    not all ASCII digits, or too large for this platform's gmtime to accept."""
-    if not _RESET_RE.fullmatch(reset or ""):
-        return None
-    try:
-        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(reset)))
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
 def _explain_http(exc, url):
     token_sent = bool(github_auth.auth_headers(url))
     if github_auth.rate_limited(exc):
-        when = _reset_time(exc.headers.get("X-RateLimit-Reset"))
+        when = github_auth.reset_time(exc.headers.get("X-RateLimit-Reset"))
         resets = f"it resets at {when}" if when else "it resets within the hour"
         if token_sent:
             return f"The rate limit for your GITHUB_TOKEN is used up; {resets}. {OFFLINE}"

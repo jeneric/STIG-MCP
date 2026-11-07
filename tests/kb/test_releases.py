@@ -417,23 +417,6 @@ def test_explain__rate_limited_with_no_reset_header__says_within_the_hour_not_at
     assert "at within the hour" not in message
 
 
-def test_reset_time__gmtime_rejects_a_value_this_platform_cannot_hold__is_unknown(monkeypatch):
-    # A 10-digit value never overflows gmtime on Linux; simulate a platform (e.g. Windows) whose
-    # time_t range is narrower, since _reset_time's except clause exists for exactly that case.
-    def raising_gmtime(value):
-        raise OverflowError("timestamp out of range for platform time_t")
-
-    monkeypatch.setattr(releases.time, "gmtime", raising_gmtime)
-    assert releases._reset_time("9999999999") is None
-
-
-def test_reset_time__millisecond_value__is_unknown_not_a_wrong_far_future_date():
-    # 13 ASCII digits parse and gmtime accepts them without raising, but as a reset time this is
-    # milliseconds, not GitHub's seconds, and would silently print a date around the year 58710
-    # if the length check did not reject it first.
-    assert releases._reset_time("1790559566000") is None
-
-
 def test_explain__connection_times_out__says_timed_out_not_could_not_reach():
     exc = urllib.error.URLError(TimeoutError("timed out"))
     message = releases.explain(exc, releases.LISTING_URL)
