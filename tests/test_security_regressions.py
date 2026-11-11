@@ -42,11 +42,13 @@ import re
 import shutil
 import sqlite3
 import ssl
+import subprocess
 import urllib.error
 import urllib.request
 import zipfile
 
 import pytest
+import yaml
 from defusedxml.common import DefusedXmlException
 
 from stig_mcp import github_auth
@@ -1428,13 +1430,17 @@ def test_verify__a_hand_placed_cui_archive_in_the_sources__refuses_the_release(t
         kb_verify.verify(copy, sources, golden=())
 
 
-def test_decide__a_draft_whose_tag_is_not_a_kb_tag__is_never_scheduled_for_deletion():
-    """delete_drafts feeds a DELETE call in the workflow. Only kb-YYYY-MM-DD drafts qualify,
+def test_kb_release_publish__a_draft_whose_tag_is_not_a_kb_tag__is_never_deleted():
+    """The publish job's DRAFT_FILTER feeds a DELETE call. Only kb-YYYY-MM-DD drafts qualify,
     matched in full, so a package draft or a crafted tag name cannot be swept up. Nor can a
-    non-positive-int id: True and False are ints in Python (bool subclasses int), and 0 or a
-    negative id is never a real release id, so each must be refused the same as a string id."""
-    from tools import kb_release  # noqa: PLC0415
-
+    non-positive-int id: a string, a boolean, 0 or a negative id is never a real release id.
+    The filter is read from the workflow and run through the jq the runner image ships."""
+    jq = shutil.which("jq")
+    assert jq, "jq is required: it ships on GitHub's ubuntu runners and runs the publish job's draft filter"
+    workflow = yaml.safe_load(
+        (pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/kb-release.yml").read_text()
+    )
+    step = next(s for s in workflow["jobs"]["publish"]["steps"] if s.get("name") == "Replace unpublished drafts")
     listing = [
         {"id": 1, "tag_name": "kb-2026-09-29", "draft": True, "prerelease": False, "assets": []},
         {"id": 2, "tag_name": "kb-2026-09-29/../v0.1.0", "draft": True, "prerelease": False, "assets": []},
@@ -1445,8 +1451,13 @@ def test_decide__a_draft_whose_tag_is_not_a_kb_tag__is_never_scheduled_for_delet
         {"id": 0, "tag_name": "kb-2026-09-25", "draft": True, "prerelease": False, "assets": []},
         {"id": -1, "tag_name": "kb-2026-09-24", "draft": True, "prerelease": False, "assets": []},
     ]
-    decision = kb_release.decide(listing, 10, "schedule", None, "2026-10-05", "0.1.0")
-    assert "delete_drafts" not in decision
+    # S603: argv is jq plus this repository's own workflow text, never external input.
+    result = subprocess.run(  # noqa: S603
+        [jq, "-r", step["env"]["DRAFT_FILTER"]], input=json.dumps(listing), capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result
+    assert result.stderr == ""
+    assert result.stdout.splitlines() == ["1"]
 
 
 _TOKEN_CASES = {

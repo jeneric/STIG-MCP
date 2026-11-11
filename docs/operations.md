@@ -469,14 +469,21 @@ never publishes anything: what it makes is a draft. GitHub disables a public rep
 scheduled workflows after 60 days with no repository activity; re-enable it from the Actions
 tab if that happens.
 
-It restores the sources directory an earlier run cached and runs `stig-mcp-fetch --check`
-against it. `tools/kb_release.py` then decides from that exit code and the repository's
-release listing. It builds when the check reported something new (exit 10), when no release
-is published for the current schema, when the newest published release was built with a
-different stig-mcp version than the code the run checked out, or when the run was started by
-hand. A check that exits 3, a source it could not reach, fails the run instead, because the
-run cannot then tell whether upstream changed; so does any exit other than 0, 3 and 10. With
-none of those reasons the run stops there, having built nothing.
+A run is two jobs. The `build` job holds a read-only token and does the check, the decision,
+the refresh, the ingest, the tests, the verification and the packaging. The `publish` job
+holds the write token and runs none of the project's code, only `gh`, `git` and `jq`, so
+code that takes over the fetch, the ingest or the tests can never reach a write token. It
+checks the tag and the asset names the build job handed it, replaces `kb-*` drafts, drafts
+the release and records `kb/LATEST`.
+
+The build job restores the sources directory an earlier run cached and runs
+`stig-mcp-fetch --check` against it. `tools/kb_release.py` then decides from that exit code
+and the repository's release listing. It builds when the check reported something new
+(exit 10), when no release is published for the current schema, when the newest published
+release was built with a different stig-mcp version than the code the run checked out, or
+when the run was started by hand. A check that exits 3, a source it could not reach, fails
+the run instead, because the run cannot then tell whether upstream changed; so does any exit
+other than 0, 3 and 10. With none of those reasons the run stops there, having built nothing.
 
 A build then does, in order:
 
@@ -507,12 +514,15 @@ A build then does, in order:
 When that `release.json` matches the newest published release's in `built_with`, upstream
 versions, benchmarks and source digests, the build is unchanged and the run drafts nothing,
 unless it was started by hand from the Actions tab (`workflow_dispatch`), which always
-drafts. Otherwise it deletes every `kb-*` draft still waiting, refusing if one has been
-published meanwhile, then drafts a release tagged `kb-` and the UTC date, with those assets
-and notes listing the benchmarks added, changed and dropped since the newest published
-release, one per line, then the upstream versions and both SHA-256 values. It records the
-draft on the `kb-latest` branch in `kb/LATEST`: the tag, the schema and the decompressed
-knowledge base's SHA-256.
+drafts. Otherwise the build job uploads the assets, notes and `LATEST` as the `kb-release`
+artifact, kept five days, and the publish job takes over. It refuses a tag that is not `kb-`
+and a date, and an asset name that is not a plain file in the downloaded artifact. It lists
+the releases itself, since a read-only token never sees drafts, and deletes every `kb-*`
+draft still waiting, refusing if one has been published meanwhile. Then it drafts a release
+tagged `kb-` and the UTC date, with those assets and notes listing the benchmarks added,
+changed and dropped since the newest published release, one per line, then the upstream
+versions and both SHA-256 values. It records the draft on the `kb-latest` branch in
+`kb/LATEST`: the tag, the schema and the decompressed knowledge base's SHA-256.
 
 **Approving a release is publishing its draft** on the repository's releases page. Until
 then no install and no `check_sources` sees it: a draft is absent from the listing an
@@ -564,11 +574,12 @@ Go on only if the `--check` exits 0, which is why `decide` is passed 0. `decide`
 `tag` to pass as `TAG`, or refuses and says why. `newest`
 prints the newest published release for this schema, and nothing when there is none: then
 the block skips the download and runs `decide` and `build` without `--previous` and
-`--previous-tag`, and the notes say "First release for schema N". The release directory
-then holds the assets, `notes.md`, `assets.txt` (the assets to upload) and `LATEST`; draft
-the release from them as the workflow's "Draft release" step does, after deleting any `kb-*` draft still waiting, as the workflow's `publish` job does. Without `--previous` the
-build always counts as changed; with it, a build matching that release writes an empty
-`assets.txt`, and there is nothing to draft.
+`--previous-tag`, and the notes say "First release for schema N". The release directory then
+holds the assets, `notes.md`, `assets.txt` (the assets to upload) and `LATEST`; draft the
+release from them as the workflow's "Draft release" step does. Delete any `kb-*` draft still
+waiting first, as the workflow's `publish` job does. Without `--previous` the build always
+counts as changed; with it, a build matching that release writes an empty `assets.txt`, and
+there is nothing to draft.
 
 ## The lifecycle of sources/
 

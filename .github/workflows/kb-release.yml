@@ -6,21 +6,26 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  issues: write
+permissions: {}
 
 concurrency:
   group: kb-release
   cancel-in-progress: false
 
 jobs:
-  release:
+  # Runs upstream data and third-party code, so it holds only a read token. A read token
+  # lists published releases but never drafts, which is why publish finds its own drafts.
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
     # GH_TOKEN goes only to the steps that run gh, never to the fetch, ingest or tests.
     env:
       GH_REPO: ${{ github.repository }}
+    outputs:
+      changed: ${{ steps.build.outputs.changed }}
+      tag: ${{ steps.decide.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,48 +117,14 @@ jobs:
             --out "$RUNNER_TEMP/release" --event "${{ github.event_name }}" \
             "${previous[@]}" --github-output "$GITHUB_OUTPUT" --step-summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Replace unpublished drafts
+      - name: Upload the release
         if: steps.build.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DELETE_DRAFTS: ${{ steps.decide.outputs.delete_drafts }}
-        run: |
-          read -ra draft_ids <<< "$DELETE_DRAFTS"
-          for id in "${draft_ids[@]}"; do
-            draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
-            [ "$draft" = "true" ] || { echo "release $id is not a draft; refusing to delete it"; exit 1; }
-            gh api -X DELETE "repos/$GH_REPO/releases/$id"
-          done
-
-      - name: Draft release
-        if: steps.build.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.decide.outputs.tag }}
-        run: |
-          mapfile -t assets < "$RUNNER_TEMP/release/assets.txt"
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Knowledge base $TAG" --notes-file "$RUNNER_TEMP/release/notes.md" "${assets[@]}"
-
-      - name: Record kb/LATEST on kb-latest
-        if: steps.build.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.decide.outputs.tag }}
-        run: |
-          gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads origin kb-latest; then
-            git fetch origin kb-latest
-            git worktree add -B kb-latest "$RUNNER_TEMP/latest" FETCH_HEAD
-          else
-            git worktree add --orphan -b kb-latest "$RUNNER_TEMP/latest"
-          fi
-          mkdir -p "$RUNNER_TEMP/latest/kb"
-          cp "$RUNNER_TEMP/release/LATEST" "$RUNNER_TEMP/latest/kb/LATEST"
-          git -C "$RUNNER_TEMP/latest" add kb/LATEST
-          git -C "$RUNNER_TEMP/latest" commit -m "Record draft $TAG"
-          git -C "$RUNNER_TEMP/latest" push origin kb-latest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kb-release
+          path: ${{ runner.temp }}/release
+          retention-days: 5
+          if-no-files-found: error
 
       - name: Save sources
         if: steps.decide.outputs.build == 'true'
@@ -162,9 +133,109 @@ jobs:
           path: ${{ runner.temp }}/kb-data/sources
           key: kb-sources-${{ github.run_id }}
 
-      # A job timeout ends as cancelled, not failed.
+  # Holds the write token and runs none of the repository's code: only gh, git and jq from
+  # the runner image. The build job's outputs and artifact are untrusted input here.
+  publish:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - name: Check the tag
+        run: |
+          [[ "$TAG" =~ ^kb-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "build job output tag '$TAG' is not kb-YYYY-MM-DD; refusing to publish"; exit 1; }
+
+      - name: Download the release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kb-release
+          path: ${{ runner.temp }}/release
+
+      # assets.txt holds paths on the build runner, so only each basename is used, and only
+      # when it names a plain file in the download that no option parser can mistake for a flag.
+      - name: Check the assets
+        run: |
+          dir="$RUNNER_TEMP/release"
+          : > "$RUNNER_TEMP/assets.checked"
+          while IFS= read -r path || [ -n "$path" ]; do
+            name=${path##*/}
+            [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [ -f "$dir/$name" ] && [ ! -L "$dir/$name" ] || {
+              echo "assets.txt names '$path', which is not a plain file in the downloaded release; refusing to publish"
+              exit 1
+            }
+            echo "$name" >> "$RUNNER_TEMP/assets.checked"
+          done < "$dir/assets.txt"
+          [ -s "$RUNNER_TEMP/assets.checked" ] || { echo "assets.txt lists no assets; refusing to publish"; exit 1; }
+
+      # The listing goes to a file first: the default shell has no pipefail, so a failed
+      # listing piped into jq would read as no drafts at all. jq's $ also matches before a
+      # trailing newline, hence the length check.
+      - name: Replace unpublished drafts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_FILTER: >-
+            .[] | select(.draft == true
+            and (.id | type) == "number" and .id > 0 and .id == (.id | floor)
+            and (.tag_name | type) == "string"
+            and (.tag_name | test("^kb-[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+            and (.tag_name | length) == 13) | .id
+        run: |
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          jq -r "$DRAFT_FILTER" "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/draft-ids.txt"
+          mapfile -t draft_ids < "$RUNNER_TEMP/draft-ids.txt"
+          for id in "${draft_ids[@]}"; do
+            draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
+            [ "$draft" = "true" ] || { echo "release $id is not a draft; refusing to delete it"; exit 1; }
+            gh api -X DELETE "repos/$GH_REPO/releases/$id"
+          done
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          mapfile -t assets < "$RUNNER_TEMP/assets.checked"
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Knowledge base $TAG" --notes-file notes.md "${assets[@]}"
+
+      - name: Record kb/LATEST on kb-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          git init -q "$RUNNER_TEMP/latest"
+          cd "$RUNNER_TEMP/latest"
+          git remote add origin "https://github.com/$GH_REPO"
+          if git ls-remote --exit-code --heads origin kb-latest; then
+            git fetch --depth 1 origin kb-latest
+            git checkout -B kb-latest FETCH_HEAD
+          else
+            git checkout --orphan kb-latest
+          fi
+          mkdir -p kb
+          cp "$RUNNER_TEMP/release/LATEST" kb/LATEST
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kb/LATEST
+          git commit -m "Record draft $TAG"
+          git push origin kb-latest
+
+  # A job timeout ends as cancelled, not failed. The condition is on the job because a
+  # step's failure() reads only its own job's status, never an earlier job's.
+  report:
+    needs: [build, publish]
+    if: failure() || cancelled()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
       - name: Report failure
-        if: failure() || cancelled()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
