@@ -1446,7 +1446,7 @@ def test_decide__a_draft_whose_tag_is_not_a_kb_tag__is_never_scheduled_for_delet
         {"id": -1, "tag_name": "kb-2026-09-24", "draft": True, "prerelease": False, "assets": []},
     ]
     decision = kb_release.decide(listing, 10, "schedule", None, "2026-10-05", "0.1.0")
-    assert decision["delete_drafts"] == [1]
+    assert "delete_drafts" not in decision
 
 
 _TOKEN_CASES = {

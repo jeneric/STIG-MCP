@@ -561,12 +561,12 @@ uv run python -m tools.kb_release build --tag TAG --out "$WORK/release" "${previ
 ```
 
 Go on only if the `--check` exits 0, which is why `decide` is passed 0. `decide` prints the
-`tag` to pass as `TAG` and the `delete_drafts` to remove, or refuses and says why. `newest`
+`tag` to pass as `TAG`, or refuses and says why. `newest`
 prints the newest published release for this schema, and nothing when there is none: then
 the block skips the download and runs `decide` and `build` without `--previous` and
 `--previous-tag`, and the notes say "First release for schema N". The release directory
 then holds the assets, `notes.md`, `assets.txt` (the assets to upload) and `LATEST`; draft
-the release from them as the workflow's "Draft release" step does. Without `--previous` the
+the release from them as the workflow's "Draft release" step does, after deleting any `kb-*` draft still waiting, as the workflow's `publish` job does. Without `--previous` the
 build always counts as changed; with it, a build matching that release writes an empty
 `assets.txt`, and there is nothing to draft.
 
