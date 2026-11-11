@@ -85,6 +85,12 @@ def test_kb_release_workflow__permissions__are_empty_at_workflow_level_and_least
     assert _doc()["permissions"] == {}
     assert _job("build")["permissions"] == {"contents": "read"}
     assert _job("publish")["permissions"] == {"contents": "write"}
+    assert _job("report")["permissions"] == {"issues": "write", "actions": "write"}
+
+
+def test_kb_release_workflow__jobs__are_exactly_build_publish_and_report():
+    # Every job's permissions are pinned above; a fourth job would escape them.
+    assert set(_doc()["jobs"]) == {"build", "publish", "report"}
 
 
 def test_kb_release_workflow__triggers__are_a_weekly_schedule_off_the_hour_and_manual_dispatch():
@@ -159,7 +165,36 @@ def test_kb_release_workflow__report_failure__also_runs_when_the_job_times_out()
     assert _job("report")["if"].replace(" ", "") == "failure()||cancelled()"
     # A step's failure() reads only its own job's status, so a step condition here never fires.
     assert "if" not in _step("Report failure", "report")
-    assert set(_job("report")["needs"]) == {"build", "publish"}
+    assert _job("report")["needs"] == ["build", "publish"]
+    steps = _steps("report")
+    assert {"checkout", "setup-uv"}.isdisjoint(
+        {step["uses"].split("@")[0].split("/")[1] for step in steps if "uses" in step}
+    )
+    assert not any("uv " in step.get("run", "") for step in steps)
+
+
+def test_kb_release_workflow__cache_retraction__runs_only_when_publish_failed_or_was_cancelled():
+    step = _step("Retract the sources cache", "report")
+    condition = step["if"]
+    assert set(re.findall(r"'([^']*)'", condition)) == {"failure", "cancelled"}
+    assert set(re.findall(r"[\w.]+\.result", condition)) == {"needs.publish.result"}
+    assert re.sub(r"needs\.publish\.result\s*==\s*'(failure|cancelled)'", "", condition).strip() == "||"
+    # The delete names exactly the key the build job saves under, never a wildcard or prefix.
+    saved_key = _step("Save sources")["with"]["key"]
+    assert saved_key == "kb-sources-${{ github.run_id }}"
+    assert step["run"].strip() == f'gh cache delete "{saved_key.replace("${{ github.run_id }}", "$GITHUB_RUN_ID")}"'
+
+
+def test_kb_release_workflow__cache_retraction__comes_before_the_issue_and_cannot_stop_it():
+    names = [step["name"] for step in _steps("report")]
+    assert names.index("Retract the sources cache") < names.index("Report failure")
+    retract = _step("Retract the sources cache", "report")
+    # A failed delete stays visible as a failed step but must not block the issue, so the
+    # issue step stays unconditional and the delete is never made to exit 0 by hand.
+    assert retract["continue-on-error"] is True
+    assert "if" not in _step("Report failure", "report")
+    for line in retract["run"].splitlines():
+        assert "||" not in line and "set +e" not in line, line
 
 
 def test_kb_release_workflow__replace_drafts__re_reads_draft_and_refuses_before_any_delete():
@@ -237,6 +272,7 @@ def test_kb_release_workflow__token__is_given_to_exactly_the_steps_that_run_gh()
         ("publish", "Replace unpublished drafts"),
         ("publish", "Draft release"),
         ("publish", "Record kb/LATEST on kb-latest"),
+        ("report", "Retract the sources cache"),
         ("report", "Report failure"),
     } <= gh_steps
     assert _token_steps() == gh_steps

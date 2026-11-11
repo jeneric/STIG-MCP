@@ -246,9 +246,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      actions: write
     env:
       GH_REPO: ${{ github.repository }}
     steps:
+      # A failed publish must leave next week's --check seeing the change, so the sources the
+      # build cached are discarded. A failed delete is shown as a warning and must not stop
+      # the issue below, hence continue-on-error rather than a swallowed exit status.
+      - name: Retract the sources cache
+        if: needs.publish.result == 'failure' || needs.publish.result == 'cancelled'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh cache delete "kb-sources-$GITHUB_RUN_ID"
+
       - name: Report failure
         env:
           GH_TOKEN: ${{ github.token }}

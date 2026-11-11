@@ -516,7 +516,9 @@ versions, benchmarks and source digests, the build is unchanged and the run draf
 unless it was started by hand from the Actions tab (`workflow_dispatch`), which always
 drafts. Otherwise the build job uploads the assets, notes and `LATEST` as the `kb-release`
 artifact, kept five days, and the publish job takes over. It refuses a tag that is not `kb-`
-and a date, and an asset name that is not a plain file in the downloaded artifact. It lists
+and a date, and an asset name that is not a plain file in the downloaded artifact. It also refuses a
+`notes.md` or `LATEST` that is missing or a symlink, and a `LATEST` not in its three-line
+format. It lists
 the releases itself, since a read-only token never sees drafts, and deletes every `kb-*`
 draft still waiting, refusing if one has been published meanwhile. Then it drafts a release
 tagged `kb-` and the UTC date, with those assets and notes listing the benchmarks added,
@@ -532,7 +534,9 @@ run that would build on a day whose release is already published fails and names
 since the tag is the date; run it again after 00:00 UTC.
 
 A run that fails, or is canceled, which is how a timeout ends, opens an issue labeled
-`kb-release` linking to the run, or comments on the one already open.
+`kb-release` linking to the run, or comments on the one already open. That covers a failed
+publish job too. A failed or canceled publish also discards the run's cached sources, so
+next week's check sees the change again and the build is retried.
 
 ### Building a release by hand (checkout only)
 
