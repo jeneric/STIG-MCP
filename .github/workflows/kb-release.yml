@@ -18,11 +18,13 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # GH_TOKEN goes only to the steps that run gh, never to the fetch, ingest or tests.
     env:
-      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -52,6 +54,8 @@ jobs:
 
       - name: Decide
         id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh api "repos/$GH_REPO/releases?per_page=100" > "$RUNNER_TEMP/listing.json"
           newest=$(uv run python -m tools.kb_release newest --listing "$RUNNER_TEMP/listing.json")
@@ -111,6 +115,7 @@ jobs:
       - name: Replace unpublished drafts
         if: steps.build.outputs.changed == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           DELETE_DRAFTS: ${{ steps.decide.outputs.delete_drafts }}
         run: |
           read -ra draft_ids <<< "$DELETE_DRAFTS"
@@ -123,6 +128,7 @@ jobs:
       - name: Draft release
         if: steps.build.outputs.changed == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.decide.outputs.tag }}
         run: |
           mapfile -t assets < "$RUNNER_TEMP/release/assets.txt"
@@ -131,8 +137,10 @@ jobs:
       - name: Record kb/LATEST on kb-latest
         if: steps.build.outputs.changed == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.decide.outputs.tag }}
         run: |
+          gh auth setup-git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin kb-latest; then
@@ -157,6 +165,8 @@ jobs:
       # A job timeout ends as cancelled, not failed.
       - name: Report failure
         if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh label create kb-release --color B60205 --description "Knowledge-base release workflow" --force
           url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
