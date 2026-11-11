@@ -159,11 +159,13 @@ jobs:
       # assets.txt holds paths on the build runner, so only each basename is used, and only
       # when it names a plain file in the download that no option parser can mistake for a flag.
       # notes.md and LATEST are read by token steps, and LATEST is pushed to a public branch, so
-      # a symlink to /proc/self/environ there would publish the token.
+      # a symlink to /proc/self/environ there would publish the token. The artifact keeps dot
+      # directories, so anything else in it, a .git above all, is refused: git run there with
+      # the token in its environment would read that config.
       - name: Check the assets
         run: |
           dir="$RUNNER_TEMP/release"
-          for file in notes.md LATEST; do
+          for file in assets.txt notes.md LATEST; do
             [ -f "$dir/$file" ] && [ ! -L "$dir/$file" ] || {
               echo "the downloaded release has no plain file $file; refusing to publish"
               exit 1
@@ -185,6 +187,16 @@ jobs:
             echo "$name" >> "$RUNNER_TEMP/assets.checked"
           done < "$dir/assets.txt"
           [ -s "$RUNNER_TEMP/assets.checked" ] || { echo "assets.txt lists no assets; refusing to publish"; exit 1; }
+          declare -A allowed=([assets.txt]=1 [notes.md]=1 [LATEST]=1)
+          while IFS= read -r name; do allowed[$name]=1; done < "$RUNNER_TEMP/assets.checked"
+          find "$dir" -mindepth 1 -print0 > "$RUNNER_TEMP/download.list"
+          while IFS= read -r -d '' entry; do
+            name=${entry#"$dir"/}
+            [ -n "${allowed[$name]+set}" ] || {
+              echo "the downloaded release holds '$name', which is not a checked file; refusing to publish"
+              exit 1
+            }
+          done < "$RUNNER_TEMP/download.list"
 
       # The listing goes to a file first: the default shell has no pipefail, so a failed
       # listing piped into jq would read as no drafts at all. jq's $ also matches before a
@@ -208,13 +220,17 @@ jobs:
             gh api -X DELETE "repos/$GH_REPO/releases/$id"
           done
 
+      # Without --repo, gh asks git in its working directory for the tag, so it runs outside
+      # the artifact and is told the repository.
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd "$RUNNER_TEMP/release"
-          mapfile -t assets < "$RUNNER_TEMP/assets.checked"
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Knowledge base $TAG" --notes-file notes.md "${assets[@]}"
+          cd "$RUNNER_TEMP"
+          mapfile -t names < "$RUNNER_TEMP/assets.checked"
+          assets=("${names[@]/#/$RUNNER_TEMP/release/}")
+          gh release create "$TAG" --repo "$GH_REPO" --draft --target "$GITHUB_SHA" --title "Knowledge base $TAG" \
+            --notes-file "$RUNNER_TEMP/release/notes.md" "${assets[@]}"
 
       - name: Record kb/LATEST on kb-latest
         env:
@@ -238,12 +254,14 @@ jobs:
           git commit -m "Record draft $TAG"
           git push origin kb-latest
 
-  # A job timeout ends as cancelled, not failed. The condition is on the job because a
-  # step's failure() reads only its own job's status, never an earlier job's.
+  # A job timeout ends as cancelled, not failed, and a job-level cancelled() is true only
+  # when the whole run is canceled, so the needed jobs' results are read directly. The
+  # condition is on the job because a step's failure() reads only its own job's status.
   report:
     needs: [build, publish]
-    if: failure() || cancelled()
+    if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       issues: write
       actions: write
@@ -258,17 +276,17 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh cache delete "kb-sources-$GITHUB_RUN_ID"
+        run: gh cache delete "kb-sources-$GITHUB_RUN_ID" --repo "$GH_REPO"
 
       - name: Report failure
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh label create kb-release --color B60205 --description "Knowledge-base release workflow" --force
+          gh label create kb-release --repo "$GH_REPO" --color B60205 --description "Knowledge-base release workflow" --force
           url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
-          issue=$(gh issue list --label kb-release --state open --json number --jq '.[0].number')
+          issue=$(gh issue list --repo "$GH_REPO" --label kb-release --state open --json number --jq '.[0].number')
           if [ -n "$issue" ]; then
-            gh issue comment "$issue" --body "Failed again: $url"
+            gh issue comment "$issue" --repo "$GH_REPO" --body "Failed again: $url"
           else
-            gh issue create --title "Knowledge-base release failed" --label kb-release --body "The kb-release workflow failed: $url"
+            gh issue create --repo "$GH_REPO" --title "Knowledge-base release failed" --label kb-release --body "The kb-release workflow failed: $url"
           fi

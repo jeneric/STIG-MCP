@@ -34,7 +34,7 @@ def _step(name, job="build"):
     return next(step for step in _steps(job) if step.get("name") == name)
 
 
-def _run_bash(script, env=None, cwd=None):
+def _run_bash(script, env=None, cwd=None, timeout=None):
     # GitHub runs a step with no shell: override as `bash -e {0}`, without pipefail.
     bash = shutil.which("bash")
     assert bash, "bash is required to run the workflow step"
@@ -46,6 +46,7 @@ def _run_bash(script, env=None, cwd=None):
         check=False,
         env={**os.environ, **(env or {})},
         cwd=cwd,
+        timeout=timeout,
     )
 
 
@@ -159,17 +160,19 @@ def test_kb_release_workflow__decide_step__downloads_the_previous_release_and_ne
     assert '"${previous[@]}"' in invocation, invocation
 
 
-def test_kb_release_workflow__report_failure__also_runs_when_the_job_times_out():
-    # A job that hits timeout-minutes ends as cancelled, never as failed, so failure() alone
-    # would let the weekly run die silently.
-    assert _job("report")["if"].replace(" ", "") == "failure()||cancelled()"
+def test_kb_release_workflow__report__runs_when_a_needed_job_failed_or_was_cancelled():
+    # A job that hits timeout-minutes ends as cancelled, never as failed, and a job-level
+    # cancelled() is true only for a whole-run cancel, so the needed jobs' results are read.
+    # always() keeps the job from being skipped by the default success() check.
+    assert re.sub(r"\s", "", _job("report")["if"]) == (
+        "always()&&(contains(needs.*.result,'failure')||contains(needs.*.result,'cancelled'))"
+    )
     # A step's failure() reads only its own job's status, so a step condition here never fires.
     assert "if" not in _step("Report failure", "report")
     assert _job("report")["needs"] == ["build", "publish"]
+    assert _job("report")["timeout-minutes"] == 10
     steps = _steps("report")
-    assert {"checkout", "setup-uv"}.isdisjoint(
-        {step["uses"].split("@")[0].split("/")[1] for step in steps if "uses" in step}
-    )
+    assert [step["uses"] for step in steps if "uses" in step] == []
     assert not any("uv " in step.get("run", "") for step in steps)
 
 
@@ -182,7 +185,8 @@ def test_kb_release_workflow__cache_retraction__runs_only_when_publish_failed_or
     # The delete names exactly the key the build job saves under, never a wildcard or prefix.
     saved_key = _step("Save sources")["with"]["key"]
     assert saved_key == "kb-sources-${{ github.run_id }}"
-    assert step["run"].strip() == f'gh cache delete "{saved_key.replace("${{ github.run_id }}", "$GITHUB_RUN_ID")}"'
+    run_key = saved_key.replace("${{ github.run_id }}", "$GITHUB_RUN_ID")
+    assert step["run"].strip() == f'gh cache delete "{run_key}" --repo "$GH_REPO"'
 
 
 def test_kb_release_workflow__cache_retraction__comes_before_the_issue_and_cannot_stop_it():
@@ -322,8 +326,8 @@ def test_kb_release_workflow__every_push__authenticates_through_gh_earlier_in_it
 
 def test_kb_release_workflow__publish__runs_no_repository_code_or_dependencies():
     # publish holds the write token, so it runs only gh, git and jq from the runner image.
-    uses = [step.get("uses", "") for step in _steps("publish")]
-    assert not [u for u in uses if u.startswith(("actions/checkout@", "astral-sh/setup-uv@"))], uses
+    uses = [step["uses"] for step in _steps("publish") if "uses" in step]
+    assert uses == ["actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"]
     runs = [line for step in _steps("publish") for line in _logical_lines(step.get("run", ""))]
     assert runs, "publish runs nothing, so this test would pass vacuously"
     assert [line for line in runs if re.search(r"\b(uv|python3?|pip)\b", line)] == []
@@ -379,9 +383,12 @@ def test_kb_release_workflow__check_the_tag__refuses_anything_but_a_kb_date(tag,
 
 _TAG = "kb-2026-11-11"
 _LATEST = f"{_TAG}\nschema 7\nsha256 {'a' * 64}\n"
+_ASSETS = ["release.json", "SHA256SUMS"]
 
 
 def _release_dir(tmp_path, listed):
+    # Holds exactly the files a build writes for _ASSETS, so a passing check is the control
+    # every refusal case below differs from by one thing.
     release = tmp_path / "release"
     release.mkdir()
     (release / "release.json").write_text("{}\n")
@@ -397,11 +404,14 @@ def _check_assets(tmp_path):
     return _run_bash(_step("Check the assets", "publish")["run"], env=env)
 
 
+def _assert_refused(result):
+    assert result.returncode != 0, result
+    assert "refusing to publish" in result.stdout + result.stderr
+
+
 def test_kb_release_workflow__check_the_assets__writes_basenames_and_refuses_unsafe_names(tmp_path):
     # assets.txt holds absolute paths on the build runner; publish uploads by basename.
-    _release_dir(
-        tmp_path, ["/home/runner/work/_temp/release/release.json", "/home/runner/work/_temp/release/SHA256SUMS"]
-    )
+    _release_dir(tmp_path, [f"/home/runner/work/_temp/release/{name}" for name in _ASSETS])
     result = _check_assets(tmp_path)
     assert result.returncode == 0, result
     assert (tmp_path / "assets.checked").read_text() == "release.json\nSHA256SUMS\n"
@@ -409,16 +419,31 @@ def test_kb_release_workflow__check_the_assets__writes_basenames_and_refuses_uns
 
 @pytest.mark.parametrize("listed", ["-rf", "a/b", "missing.txt", "link.json", None])
 def test_kb_release_workflow__check_the_assets__refuses_an_unsafe_or_empty_list(tmp_path, listed):
-    # Each case is refused by one guard alone: "-rf" and the symlink name real files, and the
-    # symlink points at a regular one. "a/b" reduces to "b", which is refused as missing.
-    release = _release_dir(tmp_path, ["release.json"] + ([listed] if listed else []))
+    # Each case is refused by one guard alone: "-rf" and the symlink name real, listed files,
+    # and the symlink points at a regular one. "a/b" reduces to "b", which is refused as
+    # missing. The empty list leaves no unlisted asset behind for the download sweep to find.
+    release = _release_dir(tmp_path, [*_ASSETS, listed] if listed else [])
     if listed is None:
-        (release / "assets.txt").write_text("")
-    (release / "-rf").write_text("x\n")
-    (release / "link.json").symlink_to(release / "release.json")
-    result = _check_assets(tmp_path)
-    assert result.returncode != 0, result
-    assert "refusing to publish" in result.stdout + result.stderr
+        (release / "release.json").unlink()
+        (release / "SHA256SUMS").unlink()
+    if listed == "-rf":
+        (release / "-rf").write_text("x\n")
+    if listed == "link.json":
+        (release / "link.json").symlink_to(release / "release.json")
+    _assert_refused(_check_assets(tmp_path))
+
+
+@pytest.mark.parametrize("extra", [".git/config", ".hidden", "extra.txt", "sub/release.json", "sub/"])
+def test_kb_release_workflow__check_the_assets__refuses_a_download_holding_anything_unchecked(tmp_path, extra):
+    # git run with the artifact as its working directory reads a .git there, and its config
+    # can run any command with the step's GH_TOKEN in the environment.
+    release = _release_dir(tmp_path, _ASSETS)
+    (release / extra).parent.mkdir(parents=True, exist_ok=True)
+    if extra.endswith("/"):
+        (release / extra).mkdir()
+    else:
+        (release / extra).write_text("[core]\n\tsshCommand = sh -c 'env > PWNED'\n")
+    _assert_refused(_check_assets(tmp_path))
 
 
 def _draft_filter():
@@ -472,7 +497,7 @@ _GH_STUB = """
 gh() {
   case "$*" in
     *--paginate*) [ -n "$LIST_FAILS" ] && return 1; cat "$PAGES" ;;
-    *"--jq .draft"*) echo true ;;
+    *"--jq .draft"*) echo "$DRAFT_ANSWER" ;;
     *"-X DELETE"*) echo "$*" >> "$DELETED" ;;
     *) return 1 ;;
   esac
@@ -480,23 +505,37 @@ gh() {
 """
 
 
-@pytest.mark.parametrize("list_fails", [False, True])
-def test_kb_release_workflow__replace_drafts__deletes_only_filtered_drafts_and_fails_on_a_failed_listing(
-    tmp_path, list_fails
-):
+def _replace_drafts(tmp_path, list_fails=False, draft_answer="true"):
     _, program = _draft_filter()
     pages = tmp_path / "pages.json"
     pages.write_text("".join(json.dumps(page) + "\n" for page in _LISTING_PAGES))
-    deleted = tmp_path / "deleted"
     env = {
         "RUNNER_TEMP": str(tmp_path),
         "GH_REPO": "owner/repo",
         "DRAFT_FILTER": program,
         "PAGES": str(pages),
-        "DELETED": str(deleted),
+        "DELETED": str(tmp_path / "deleted"),
         "LIST_FAILS": "1" if list_fails else "",
+        "DRAFT_ANSWER": draft_answer,
     }
-    result = _run_bash(_GH_STUB + _step("Replace unpublished drafts", "publish")["run"], env=env)
+    return _run_bash(_GH_STUB + _step("Replace unpublished drafts", "publish")["run"], env=env)
+
+
+def test_kb_release_workflow__replace_drafts__refuses_and_deletes_nothing_when_a_listed_draft_was_published(
+    tmp_path,
+):
+    result = _replace_drafts(tmp_path, draft_answer="false")
+    assert result.returncode != 0, result
+    assert "refusing to delete" in result.stdout + result.stderr
+    assert not (tmp_path / "deleted").exists()
+
+
+@pytest.mark.parametrize("list_fails", [False, True])
+def test_kb_release_workflow__replace_drafts__deletes_only_filtered_drafts_and_fails_on_a_failed_listing(
+    tmp_path, list_fails
+):
+    result = _replace_drafts(tmp_path, list_fails=list_fails)
+    deleted = tmp_path / "deleted"
     if list_fails:
         assert result.returncode != 0, result
         assert not deleted.exists()
@@ -508,18 +547,55 @@ def test_kb_release_workflow__replace_drafts__deletes_only_filtered_drafts_and_f
         )
 
 
-def test_kb_release_workflow__draft_release__uploads_the_checked_basenames_from_the_download_directory(tmp_path):
+def test_kb_release_workflow__draft_release__uploads_the_checked_files_by_path_from_outside_the_download(
+    tmp_path,
+):
+    # gh run inside the download would ask git there for the tag, with GH_TOKEN in its env.
     release = _release_dir(tmp_path, [])
     (tmp_path / "assets.checked").write_text("release.json\nSHA256SUMS\n")
     calls = tmp_path / "calls"
     stub = 'gh() { printf "%s|%s\\n" "$PWD" "$*" >> "$CALLS"; }\n'
-    env = {"RUNNER_TEMP": str(tmp_path), "TAG": "kb-2026-11-11", "GITHUB_SHA": "abc123", "CALLS": str(calls)}
-    result = _run_bash(stub + _step("Draft release", "publish")["run"], env=env)
+    env = {
+        "RUNNER_TEMP": str(tmp_path),
+        "GH_REPO": "owner/repo",
+        "TAG": _TAG,
+        "GITHUB_SHA": "abc123",
+        "CALLS": str(calls),
+    }
+    result = _run_bash(stub + _step("Draft release", "publish")["run"], env=env, cwd=release)
     assert result.returncode == 0, result
     assert calls.read_text() == (
-        f"{release}|release create kb-2026-11-11 --draft --target abc123 --title Knowledge base kb-2026-11-11 "
-        "--notes-file notes.md release.json SHA256SUMS\n"
+        f"{tmp_path}|release create {_TAG} --repo owner/repo --draft --target abc123 --title Knowledge base {_TAG} "
+        f"--notes-file {release}/notes.md {release}/release.json {release}/SHA256SUMS\n"
     )
+
+
+# A command ends at a shell operator or a closing $( ); each gh call is checked on its own.
+_COMMAND_BOUNDARY = re.compile(r"\$\(|\)|`|;|&&|\|\|?")
+
+
+def _gh_calls(job):
+    for step in _steps(job):
+        for line in _logical_lines(step.get("run", "")):
+            for command in _COMMAND_BOUNDARY.split(line):
+                match = _GH_COMMAND.search(command)
+                if match:
+                    yield step["name"], command[command.index("gh", match.start()) :].strip()
+
+
+def test_kb_release_workflow__gh_calls_in_publish_and_report__name_the_repository_explicitly():
+    # Without a repository named, gh asks git in its working directory, and that git runs
+    # with the step's GH_TOKEN in its environment and reads whatever .git is there.
+    calls = [call for job in ("publish", "report") for call in _gh_calls(job)]
+    subcommands = [command.split()[1] for _, command in calls]
+    assert sorted(subcommands) == ["api", "api", "api", "auth", "cache", "issue", "issue", "issue", "label", "release"]
+    for name, command in calls:
+        if command == "gh auth setup-git":
+            continue
+        if command.split()[1] == "api":
+            assert '"repos/$GH_REPO/' in command, (name, command)
+        else:
+            assert '--repo "$GH_REPO"' in command, (name, command)
 
 
 def _replace_with_symlink(release, name):
@@ -530,21 +606,18 @@ def _replace_with_symlink(release, name):
     (release / name).symlink_to(target)
 
 
-@pytest.mark.parametrize("name", ["notes.md", "LATEST"])
+@pytest.mark.parametrize("name", ["assets.txt", "notes.md", "LATEST"])
 @pytest.mark.parametrize("change", ["missing", "symlink"])
-def test_kb_release_workflow__check_the_assets__refuses_notes_or_latest_that_is_not_a_plain_file(
-    tmp_path, name, change
-):
+def test_kb_release_workflow__check_the_assets__refuses_a_control_file_that_is_not_a_plain_file(tmp_path, name, change):
     # The token steps read notes.md into the draft and push LATEST to a public branch, so a
-    # symlink to /proc/self/environ there would publish the step's GH_TOKEN.
-    release = _release_dir(tmp_path, ["release.json"])
+    # symlink to /proc/self/environ there would publish the step's GH_TOKEN. assets.txt is
+    # read before the download sweep, so it is checked first.
+    release = _release_dir(tmp_path, _ASSETS)
     if change == "missing":
         (release / name).unlink()
     else:
         _replace_with_symlink(release, name)
-    result = _check_assets(tmp_path)
-    assert result.returncode != 0, result
-    assert "refusing to publish" in result.stdout + result.stderr
+    _assert_refused(_check_assets(tmp_path))
 
 
 @pytest.mark.parametrize(
@@ -571,8 +644,84 @@ def test_kb_release_workflow__check_the_assets__refuses_notes_or_latest_that_is_
     ],
 )
 def test_kb_release_workflow__check_the_assets__refuses_latest_not_in_the_package_format(tmp_path, latest):
-    release = _release_dir(tmp_path, ["release.json"])
+    release = _release_dir(tmp_path, _ASSETS)
     (release / "LATEST").write_text(latest)
-    result = _check_assets(tmp_path)
-    assert result.returncode != 0, result
-    assert "refusing to publish" in result.stdout + result.stderr
+    _assert_refused(_check_assets(tmp_path))
+
+
+def _git():
+    git = shutil.which("git")
+    assert git, "git is required: it ships on GitHub's ubuntu runners and records kb/LATEST"
+    return git
+
+
+def _git_env(tmp_path, remote):
+    # Only this config is read, so the developer's own (commit signing included) never is.
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / ".gitconfig"
+    config.write_text(
+        f'[url "file://{remote}"]\n\tinsteadOf = https://github.com/owner/repo\n'
+        "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n"
+    )
+    return {
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "GIT_CONFIG_GLOBAL": str(config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+
+
+_SEED_KB_LATEST = """
+git init -q --bare "$REMOTE"
+[ -z "$SEED" ] && exit 0
+git init -q "$SEED"
+cd "$SEED"
+git checkout -q -b kb-latest
+mkdir kb
+echo old > kb/LATEST
+echo kept > kept.txt
+git add kb/LATEST kept.txt
+git -c user.name=Seed -c user.email=seed@example.invalid commit -q -m seed
+git push -q "$REMOTE" kb-latest
+"""
+
+
+@pytest.mark.parametrize("branch_exists", [False, True])
+def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_kb_latest(tmp_path, branch_exists):
+    git = _git()
+    _release_dir(tmp_path, _ASSETS)
+    remote = tmp_path / "remote.git"
+    env = {
+        **_git_env(tmp_path, remote),
+        "REMOTE": str(remote),
+        "SEED": str(tmp_path / "seed") if branch_exists else "",
+        "RUNNER_TEMP": str(tmp_path),
+        "GH_REPO": "owner/repo",
+        "TAG": _TAG,
+    }
+    seeded = _run_bash(_SEED_KB_LATEST, env=env, timeout=60)
+    assert seeded.returncode == 0, seeded
+    stub = 'gh() { [ "$*" = "auth setup-git" ]; }\n'
+    result = _run_bash(stub + _step("Record kb/LATEST on kb-latest", "publish")["run"], env=env, timeout=60)
+    assert result.returncode == 0, result
+
+    def remote_git(*args):
+        # S603: argv is git plus fixed arguments against this test's own bare repository.
+        done = subprocess.run(  # noqa: S603
+            [git, "--git-dir", str(remote), *args],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, **env},
+        )
+        return done.stdout
+
+    assert remote_git("show", "kb-latest:kb/LATEST") == _LATEST
+    assert remote_git("log", "-1", "--format=%s", "kb-latest") == f"Record draft {_TAG}\n"
+    if branch_exists:
+        # The new commit builds on the branch rather than replacing it.
+        assert remote_git("show", "kb-latest:kept.txt") == "kept\n"
+        assert remote_git("log", "-1", "--format=%s", "kb-latest^") == "seed\n"
+    else:
+        assert remote_git("rev-list", "--count", "kb-latest") == "1\n"
