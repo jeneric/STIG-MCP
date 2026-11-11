@@ -176,7 +176,10 @@ def test_kb_release_workflow__decide_step__runs_under_the_default_bash_e_shell()
     assert "shell" not in (doc["jobs"]["release"].get("defaults") or {}).get("run", {})
 
 
-_GH_COMMAND = re.compile(r"(?:^|[\s;&|(])gh\s")
+# A gh call may sit at line start, after a shell operator, inside $( ) or backticks, or after !.
+_GH_COMMAND = re.compile(r"(?:^|[\s;&|(`!])gh\s")
+# The write token reaches a step under either expression, whatever env name carries it.
+_TOKEN_EXPRESSIONS = ("github.token", "secrets.GITHUB_TOKEN")
 
 
 def _runs_gh(step):
@@ -184,29 +187,43 @@ def _runs_gh(step):
 
 
 def _has_token(step):
-    return "GH_TOKEN" in (step.get("env") or {})
+    return any(expression in str(step) for expression in _TOKEN_EXPRESSIONS)
 
 
-def test_kb_release_workflow__workflow_and_job_env__carry_no_gh_token():
+def _token_steps():
+    return {step["name"] for step in _steps() if _has_token(step)}
+
+
+def test_kb_release_workflow__workflow_and_job_env__carry_no_token():
     # A workflow- or job-level token reaches every step, the DISA fetch and the ingest included.
-    assert "GH_TOKEN" not in (_doc().get("env") or {})
-    assert "GH_TOKEN" not in (_doc()["jobs"]["release"].get("env") or {})
+    for env in (_doc().get("env") or {}, _doc()["jobs"]["release"].get("env") or {}):
+        assert not {"GH_TOKEN", "GITHUB_TOKEN"} & set(env), env
+        assert not any(expression in str(env) for expression in _TOKEN_EXPRESSIONS), env
 
 
-def test_kb_release_workflow__gh_token__is_given_to_exactly_the_steps_that_run_gh():
+def test_kb_release_workflow__token__is_given_to_exactly_the_steps_that_run_gh():
     gh_steps = {step["name"] for step in _steps() if _runs_gh(step)}
-    token_steps = {step["name"] for step in _steps() if _has_token(step)}
     # Report failure runs only when the job breaks, so a green run never shows it lacks a token.
     assert {"Decide", "Report failure", "Record kb/LATEST on kb-latest"} <= gh_steps
-    assert token_steps == gh_steps
-    assert {step["env"]["GH_TOKEN"] for step in _steps() if _has_token(step)} == {"${{ github.token }}"}
+    assert _token_steps() == gh_steps
+    assert {step.get("env", {}).get("GH_TOKEN") for step in _steps() if _has_token(step)} == {"${{ github.token }}"}
 
 
-@pytest.mark.parametrize("command", ["stig-mcp-fetch --refresh", "stig-mcp-fetch --check", "stig-mcp-ingest", "pytest"])
-def test_kb_release_workflow__steps_that_run_upstream_or_repository_code__get_no_token(command):
-    steps = [step for step in _steps() if command in step.get("run", "")]
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv sync",
+        "stig-mcp-fetch --refresh",
+        "stig-mcp-fetch --check",
+        "stig-mcp-ingest",
+        "pytest",
+        "tools.kb_release build",
+    ],
+)
+def test_kb_release_workflow__steps_that_run_upstream_data_or_dependencies__get_no_token(command):
+    steps = [step["name"] for step in _steps() if command in step.get("run", "")]
     assert steps, f"no step runs {command}, so this test would pass vacuously"
-    assert [step["name"] for step in steps if _has_token(step) or "github.token" in str(step)] == []
+    assert set(steps) & _token_steps() == set()
 
 
 def test_kb_release_workflow__checkout__does_not_persist_the_token_in_git_config():
@@ -216,9 +233,15 @@ def test_kb_release_workflow__checkout__does_not_persist_the_token_in_git_config
     assert [step for step in checkouts if step.get("with", {}).get("persist-credentials") is not False] == []
 
 
-def test_kb_release_workflow__keepalive_push__authenticates_through_gh_before_pushing():
-    # Without the persisted checkout credential, the push has no other way to authenticate.
-    lines = _logical_lines(_step("Record kb/LATEST on kb-latest")["run"])
-    setup = next(i for i, line in enumerate(lines) if line == "gh auth setup-git")
-    push = next(i for i, line in enumerate(lines) if re.search(r"\spush\s", line))
-    assert setup < push
+def test_kb_release_workflow__every_push__authenticates_through_gh_earlier_in_its_own_step():
+    # Without the persisted checkout credential, a push has no other way to authenticate.
+    pushing = [
+        step for step in _steps() if any(re.search(r"\spush\s", line) for line in _logical_lines(step.get("run", "")))
+    ]
+    assert pushing, "no push found, so this test would pass vacuously"
+    for step in pushing:
+        lines = _logical_lines(step["run"])
+        assert "gh auth setup-git" in lines, step["name"]
+        first_push = min(i for i, line in enumerate(lines) if re.search(r"\spush\s", line))
+        assert lines.index("gh auth setup-git") < first_push, step["name"]
+        assert step["name"] in _token_steps()
