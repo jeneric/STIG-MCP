@@ -158,9 +158,23 @@ jobs:
 
       # assets.txt holds paths on the build runner, so only each basename is used, and only
       # when it names a plain file in the download that no option parser can mistake for a flag.
+      # notes.md and LATEST are read by token steps, and LATEST is pushed to a public branch, so
+      # a symlink to /proc/self/environ there would publish the token.
       - name: Check the assets
         run: |
           dir="$RUNNER_TEMP/release"
+          for file in notes.md LATEST; do
+            [ -f "$dir/$file" ] && [ ! -L "$dir/$file" ] || {
+              echo "the downloaded release has no plain file $file; refusing to publish"
+              exit 1
+            }
+          done
+          mapfile -t latest < "$dir/LATEST"
+          [ "${#latest[@]}" -eq 3 ] && [ "${latest[0]}" = "$TAG" ] && [[ "${latest[1]}" =~ ^schema\ [0-9]+$ ]] \
+            && [[ "${latest[2]}" =~ ^sha256\ [0-9a-f]{64}$ ]] || {
+            echo "LATEST is not '$TAG', 'schema N' and 'sha256 <64 hex>' on three lines; refusing to publish"
+            exit 1
+          }
           : > "$RUNNER_TEMP/assets.checked"
           while IFS= read -r path || [ -n "$path" ]; do
             name=${path##*/}

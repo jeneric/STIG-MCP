@@ -341,17 +341,24 @@ def test_kb_release_workflow__check_the_tag__refuses_anything_but_a_kb_date(tag,
         assert "refusing to publish" in result.stdout + result.stderr
 
 
+_TAG = "kb-2026-11-11"
+_LATEST = f"{_TAG}\nschema 7\nsha256 {'a' * 64}\n"
+
+
 def _release_dir(tmp_path, listed):
     release = tmp_path / "release"
     release.mkdir()
     (release / "release.json").write_text("{}\n")
     (release / "SHA256SUMS").write_text("sums\n")
+    (release / "notes.md").write_text("notes\n")
+    (release / "LATEST").write_text(_LATEST)
     (release / "assets.txt").write_text("".join(f"{line}\n" for line in listed))
     return release
 
 
 def _check_assets(tmp_path):
-    return _run_bash(_step("Check the assets", "publish")["run"], env={"RUNNER_TEMP": str(tmp_path)})
+    env = {"RUNNER_TEMP": str(tmp_path), "TAG": _TAG}
+    return _run_bash(_step("Check the assets", "publish")["run"], env=env)
 
 
 def test_kb_release_workflow__check_the_assets__writes_basenames_and_refuses_unsafe_names(tmp_path):
@@ -477,3 +484,59 @@ def test_kb_release_workflow__draft_release__uploads_the_checked_basenames_from_
         f"{release}|release create kb-2026-11-11 --draft --target abc123 --title Knowledge base kb-2026-11-11 "
         "--notes-file notes.md release.json SHA256SUMS\n"
     )
+
+
+def _replace_with_symlink(release, name):
+    # The target is a valid copy, so only the symlink test can refuse it.
+    target = release.parent / f"{name}.target"
+    target.write_text((release / name).read_text())
+    (release / name).unlink()
+    (release / name).symlink_to(target)
+
+
+@pytest.mark.parametrize("name", ["notes.md", "LATEST"])
+@pytest.mark.parametrize("change", ["missing", "symlink"])
+def test_kb_release_workflow__check_the_assets__refuses_notes_or_latest_that_is_not_a_plain_file(
+    tmp_path, name, change
+):
+    # The token steps read notes.md into the draft and push LATEST to a public branch, so a
+    # symlink to /proc/self/environ there would publish the step's GH_TOKEN.
+    release = _release_dir(tmp_path, ["release.json"])
+    if change == "missing":
+        (release / name).unlink()
+    else:
+        _replace_with_symlink(release, name)
+    result = _check_assets(tmp_path)
+    assert result.returncode != 0, result
+    assert "refusing to publish" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "latest",
+    [
+        f"kb-2026-11-10\nschema 7\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema seven\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema 7 GH_TOKEN=secret\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 63}\n",
+        f"{_TAG}\nschema 7\nsha256 {'A' * 64}\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 64}\nGH_TOKEN=secret\n",
+        f"{_TAG}\nschema 7\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 64} GH_TOKEN=secret\n",
+    ],
+    ids=[
+        "other_tag",
+        "schema_not_a_number",
+        "schema_trailing_text",
+        "short_sha",
+        "uppercase_sha",
+        "extra_line",
+        "two_lines",
+        "trailing_text",
+    ],
+)
+def test_kb_release_workflow__check_the_assets__refuses_latest_not_in_the_package_format(tmp_path, latest):
+    release = _release_dir(tmp_path, ["release.json"])
+    (release / "LATEST").write_text(latest)
+    result = _check_assets(tmp_path)
+    assert result.returncode != 0, result
+    assert "refusing to publish" in result.stdout + result.stderr
