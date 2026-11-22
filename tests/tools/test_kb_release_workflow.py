@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -14,12 +16,38 @@ def _doc():
     return yaml.safe_load(WORKFLOW.read_text())
 
 
-def _steps():
-    return _doc()["jobs"]["release"]["steps"]
+def _job(name):
+    return _doc()["jobs"][name]
 
 
-def _step(name):
-    return next(step for step in _steps() if step.get("name") == name)
+def _steps(job="build"):
+    return _job(job)["steps"]
+
+
+def _all_steps():
+    for job_name, job in _doc()["jobs"].items():
+        for step in job.get("steps", []):
+            yield job_name, step
+
+
+def _step(name, job="build"):
+    return next(step for step in _steps(job) if step.get("name") == name)
+
+
+def _run_bash(script, env=None, cwd=None, timeout=None):
+    # GitHub runs a step with no shell: override as `bash -e {0}`, without pipefail.
+    bash = shutil.which("bash")
+    assert bash, "bash is required to run the workflow step"
+    # S603: argv is bash plus this repository's own workflow text, never external input.
+    return subprocess.run(  # noqa: S603
+        [bash, "--noprofile", "--norc", "-e", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **(env or {})},
+        cwd=cwd,
+        timeout=timeout,
+    )
 
 
 def _logical_lines(script):
@@ -48,13 +76,22 @@ def _without_trailing_comment(line):
 
 
 def test_kb_release_workflow__every_action__is_pinned_by_commit_sha():
-    uses = [step["uses"] for step in _steps() if "uses" in step]
+    uses = [step["uses"] for _, step in _all_steps() if "uses" in step]
     assert uses, "no actions found, so this test would pass on an empty workflow"
     assert [u for u in uses if not _SHA_PIN.fullmatch(u)] == []
 
 
-def test_kb_release_workflow__permissions__are_exactly_contents_and_issues_write():
-    assert _doc()["permissions"] == {"contents": "write", "issues": "write"}
+def test_kb_release_workflow__permissions__are_empty_at_workflow_level_and_least_per_job():
+    # The build job runs upstream data and third-party code, so it never holds a write token.
+    assert _doc()["permissions"] == {}
+    assert _job("build")["permissions"] == {"contents": "read"}
+    assert _job("publish")["permissions"] == {"contents": "write"}
+    assert _job("report")["permissions"] == {"issues": "write", "actions": "write"}
+
+
+def test_kb_release_workflow__jobs__are_exactly_build_publish_and_report():
+    # Every job's permissions are pinned above; a fourth job would escape them.
+    assert set(_doc()["jobs"]) == {"build", "publish", "report"}
 
 
 def test_kb_release_workflow__triggers__are_a_weekly_schedule_off_the_hour_and_manual_dispatch():
@@ -65,7 +102,7 @@ def test_kb_release_workflow__triggers__are_a_weekly_schedule_off_the_hour_and_m
 
 
 def test_kb_release_workflow__releases__are_only_ever_created_as_drafts():
-    runs = "\n".join(step.get("run", "") for step in _steps())
+    runs = "\n".join(step.get("run", "") for _, step in _all_steps())
     assert "gh release create" in runs
     for line in runs.splitlines():
         if "gh release create" in line or "gh release edit" in line:
@@ -73,15 +110,14 @@ def test_kb_release_workflow__releases__are_only_ever_created_as_drafts():
     assert "--prerelease" not in runs
 
 
-def test_kb_release_workflow__sources_cache__is_saved_only_after_the_draft_exists():
-    # A refresh that fails later must leave the cache at the previous fetch, or next week's
-    # --check sees nothing new and the failed build is never retried. Order alone is not
-    # enough: an "if: always()" on Save sources would run it even when an earlier step in
-    # between failed, defeating the ordering this test otherwise pins.
+def test_kb_release_workflow__sources_cache__is_saved_last_in_build_after_the_upload():
+    # A build that fails must leave the cache at the previous fetch, or next week's --check
+    # sees nothing new and the failed build is never retried. Order alone is not enough: an
+    # "if: always()" on Save sources would run it even when an earlier step failed.
     names = [step.get("name", "") for step in _steps()]
-    assert names.index("Save sources") > names.index("Draft release")
-    assert names.index("Save sources") > names.index("Record kb/LATEST on kb-latest")
-    save_step = next(step for step in _steps() if step.get("name") == "Save sources")
+    assert names[-1] == "Save sources"
+    assert names.index("Save sources") > names.index("Upload the release")
+    save_step = _step("Save sources")
     condition = save_step.get("if", "")
     forbidden = ("always()", "failure()", "cancelled()", "!cancelled()")
     assert not any(term in condition for term in forbidden), condition
@@ -95,7 +131,7 @@ def test_kb_release_workflow__keepalive__pushes_to_kb_latest_and_never_to_main()
     # A substring check alone passes a line like "push origin kb-latest:main": the refspec
     # after the colon retargets the push. Every push line must end in exactly this target,
     # once a harmless trailing "# ..." shell comment is stripped away first.
-    runs = "\n".join(step.get("run", "") for step in _steps())
+    runs = "\n".join(step.get("run", "") for _, step in _all_steps())
     push_lines = [line.strip() for line in runs.splitlines() if re.search(r"(?:^|\s)push\s", line)]
     assert push_lines, "no push lines found, so this test would pass on a workflow with no push at all"
     for line in push_lines:
@@ -110,7 +146,7 @@ def test_kb_release_workflow__decide_step__downloads_the_previous_release_and_ne
     # satisfied by the assignment alone even if the invocation never uses it, and it
     # disappears together with the assignment if that line is deleted, silently leaving
     # `previous=()` and no way to tell decide about the previous release.
-    decide = next(step for step in _steps() if step.get("name") == "Decide")
+    decide = _step("Decide")
     script = decide.get("run", "")
     assert "gh release download" in script
     assert "set +e" not in script
@@ -124,16 +160,51 @@ def test_kb_release_workflow__decide_step__downloads_the_previous_release_and_ne
     assert '"${previous[@]}"' in invocation, invocation
 
 
-def test_kb_release_workflow__report_failure__also_runs_when_the_job_times_out():
-    # A job that hits timeout-minutes ends as cancelled, never as failed, so failure() alone
-    # would let the weekly run die silently.
-    assert _step("Report failure")["if"].replace(" ", "") == "failure()||cancelled()"
+def test_kb_release_workflow__report__runs_when_a_needed_job_failed_or_was_cancelled():
+    # A job that hits timeout-minutes ends as cancelled, never as failed, and a job-level
+    # cancelled() is true only for a whole-run cancel, so the needed jobs' results are read.
+    # always() keeps the job from being skipped by the default success() check.
+    assert re.sub(r"\s", "", _job("report")["if"]) == (
+        "always()&&(contains(needs.*.result,'failure')||contains(needs.*.result,'cancelled'))"
+    )
+    # A step's failure() reads only its own job's status, so a step condition here never fires.
+    assert "if" not in _step("Report failure", "report")
+    assert _job("report")["needs"] == ["build", "publish"]
+    assert _job("report")["timeout-minutes"] == 10
+    steps = _steps("report")
+    assert [step["uses"] for step in steps if "uses" in step] == []
+    assert not any("uv " in step.get("run", "") for step in steps)
+
+
+def test_kb_release_workflow__cache_retraction__runs_only_when_publish_failed_or_was_cancelled():
+    step = _step("Retract the sources cache", "report")
+    condition = step["if"]
+    assert set(re.findall(r"'([^']*)'", condition)) == {"failure", "cancelled"}
+    assert set(re.findall(r"[\w.]+\.result", condition)) == {"needs.publish.result"}
+    assert re.sub(r"needs\.publish\.result\s*==\s*'(failure|cancelled)'", "", condition).strip() == "||"
+    # The delete names exactly the key the build job saves under, never a wildcard or prefix.
+    saved_key = _step("Save sources")["with"]["key"]
+    assert saved_key == "kb-sources-${{ github.run_id }}"
+    run_key = saved_key.replace("${{ github.run_id }}", "$GITHUB_RUN_ID")
+    assert step["run"].strip() == f'gh cache delete "{run_key}" --repo "$GH_REPO"'
+
+
+def test_kb_release_workflow__cache_retraction__comes_before_the_issue_and_cannot_stop_it():
+    names = [step["name"] for step in _steps("report")]
+    assert names.index("Retract the sources cache") < names.index("Report failure")
+    retract = _step("Retract the sources cache", "report")
+    # A failed delete stays visible as a failed step but must not block the issue, so the
+    # issue step stays unconditional and the delete is never made to exit 0 by hand.
+    assert retract["continue-on-error"] is True
+    assert "if" not in _step("Report failure", "report")
+    for line in retract["run"].splitlines():
+        assert "||" not in line and "set +e" not in line, line
 
 
 def test_kb_release_workflow__replace_drafts__re_reads_draft_and_refuses_before_any_delete():
     # The ids come from a listing read earlier in the run; a release published since then
     # must not be deleted, so each id is re-read and must still be a draft.
-    lines = [line.strip() for line in _step("Replace unpublished drafts")["run"].splitlines()]
+    lines = [line.strip() for line in _step("Replace unpublished drafts", "publish")["run"].splitlines()]
     read = next(i for i, line in enumerate(lines) if "--jq .draft" in line and '"repos/$GH_REPO/releases/$id"' in line)
     guard = next(i for i, line in enumerate(lines) if '[ "$draft" = "true" ] ||' in line)
     delete = next(i for i, line in enumerate(lines) if "-X DELETE" in line)
@@ -155,13 +226,7 @@ def test_kb_release_workflow__confirm_sources__fails_the_step_unless_check_exits
     # the job on a stale source, so the outcome is measured rather than read off the text.
     step = _step("Confirm sources are current")
     assert "shell" not in step
-    bash = shutil.which("bash")
-    assert bash, "bash is required to run the workflow step"
-    script = f"uv() {{ return {check_exit}; }}\n{step['run']}"
-    # S603: argv is bash plus this repository's own workflow text, never external input.
-    result = subprocess.run(  # noqa: S603
-        [bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", script], capture_output=True, text=True, check=False
-    )
+    result = _run_bash(f"uv() {{ return {check_exit}; }}\n{step['run']}")
     assert (result.returncode != 0) is step_fails, result
     if step_fails:
         assert f"exited {check_exit}" in result.stdout + result.stderr
@@ -173,7 +238,8 @@ def test_kb_release_workflow__decide_step__runs_under_the_default_bash_e_shell()
     doc = _doc()
     assert "shell" not in _step("Decide")
     assert "shell" not in (doc.get("defaults") or {}).get("run", {})
-    assert "shell" not in (doc["jobs"]["release"].get("defaults") or {}).get("run", {})
+    for job in doc["jobs"].values():
+        assert "shell" not in (job.get("defaults") or {}).get("run", {})
 
 
 # A gh call may sit at line start, after a shell operator, inside $( ) or backticks, or after !.
@@ -191,22 +257,31 @@ def _has_token(step):
 
 
 def _token_steps():
-    return {step["name"] for step in _steps() if _has_token(step)}
+    return {(job, step["name"]) for job, step in _all_steps() if _has_token(step)}
 
 
 def test_kb_release_workflow__workflow_and_job_env__carry_no_token():
     # A workflow- or job-level token reaches every step, the DISA fetch and the ingest included.
-    for env in (_doc().get("env") or {}, _doc()["jobs"]["release"].get("env") or {}):
+    envs = [_doc().get("env") or {}, *((job.get("env") or {}) for job in _doc()["jobs"].values())]
+    for env in envs:
         assert not {"GH_TOKEN", "GITHUB_TOKEN"} & set(env), env
         assert not any(expression in str(env) for expression in _TOKEN_EXPRESSIONS), env
 
 
 def test_kb_release_workflow__token__is_given_to_exactly_the_steps_that_run_gh():
-    gh_steps = {step["name"] for step in _steps() if _runs_gh(step)}
-    # Report failure runs only when the job breaks, so a green run never shows it lacks a token.
-    assert {"Decide", "Report failure", "Record kb/LATEST on kb-latest"} <= gh_steps
+    gh_steps = {(job, step["name"]) for job, step in _all_steps() if _runs_gh(step)}
+    # Report failure runs only when a job breaks, so a green run never shows it lacks a token.
+    assert {
+        ("build", "Decide"),
+        ("publish", "Replace unpublished drafts"),
+        ("publish", "Draft release"),
+        ("publish", "Record kb/LATEST on kb-latest"),
+        ("report", "Retract the sources cache"),
+        ("report", "Report failure"),
+    } <= gh_steps
     assert _token_steps() == gh_steps
-    assert {step.get("env", {}).get("GH_TOKEN") for step in _steps() if _has_token(step)} == {"${{ github.token }}"}
+    tokens = {step.get("env", {}).get("GH_TOKEN") for _, step in _all_steps() if _has_token(step)}
+    assert tokens == {"${{ github.token }}"}
 
 
 @pytest.mark.parametrize(
@@ -221,14 +296,14 @@ def test_kb_release_workflow__token__is_given_to_exactly_the_steps_that_run_gh()
     ],
 )
 def test_kb_release_workflow__steps_that_run_upstream_data_or_dependencies__get_no_token(command):
-    steps = [step["name"] for step in _steps() if command in step.get("run", "")]
+    steps = [(job, step["name"]) for job, step in _all_steps() if command in step.get("run", "")]
     assert steps, f"no step runs {command}, so this test would pass vacuously"
     assert set(steps) & _token_steps() == set()
 
 
 def test_kb_release_workflow__checkout__does_not_persist_the_token_in_git_config():
     # A persisted credential sits in .git/config where every later step can read it.
-    checkouts = [step for step in _steps() if step.get("uses", "").startswith("actions/checkout@")]
+    checkouts = [step for _, step in _all_steps() if step.get("uses", "").startswith("actions/checkout@")]
     assert checkouts
     assert [step for step in checkouts if step.get("with", {}).get("persist-credentials") is not False] == []
 
@@ -236,12 +311,417 @@ def test_kb_release_workflow__checkout__does_not_persist_the_token_in_git_config
 def test_kb_release_workflow__every_push__authenticates_through_gh_earlier_in_its_own_step():
     # Without the persisted checkout credential, a push has no other way to authenticate.
     pushing = [
-        step for step in _steps() if any(re.search(r"\spush\s", line) for line in _logical_lines(step.get("run", "")))
+        (job, step)
+        for job, step in _all_steps()
+        if any(re.search(r"\spush\s", line) for line in _logical_lines(step.get("run", "")))
     ]
     assert pushing, "no push found, so this test would pass vacuously"
-    for step in pushing:
+    for job, step in pushing:
         lines = _logical_lines(step["run"])
         assert "gh auth setup-git" in lines, step["name"]
         first_push = min(i for i, line in enumerate(lines) if re.search(r"\spush\s", line))
         assert lines.index("gh auth setup-git") < first_push, step["name"]
-        assert step["name"] in _token_steps()
+        assert (job, step["name"]) in _token_steps()
+
+
+def test_kb_release_workflow__publish__runs_no_repository_code_or_dependencies():
+    # publish holds the write token, so it runs only gh, git and jq from the runner image.
+    uses = [step["uses"] for step in _steps("publish") if "uses" in step]
+    assert uses == ["actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"]
+    runs = [line for step in _steps("publish") for line in _logical_lines(step.get("run", ""))]
+    assert runs, "publish runs nothing, so this test would pass vacuously"
+    assert [line for line in runs if re.search(r"\b(uv|python3?|pip)\b", line)] == []
+
+
+def test_kb_release_workflow__publish__runs_only_when_the_build_changed():
+    assert _job("publish")["needs"] == "build"
+    assert _job("publish")["if"] == "needs.build.outputs.changed == 'true'"
+
+
+def test_kb_release_workflow__build_outputs__come_from_the_decide_and_build_steps():
+    assert _job("build")["outputs"] == {
+        "changed": "${{ steps.build.outputs.changed }}",
+        "tag": "${{ steps.decide.outputs.tag }}",
+    }
+    assert _job("publish")["env"]["TAG"] == "${{ needs.build.outputs.tag }}"
+
+
+def test_kb_release_workflow__artifact__is_uploaded_and_downloaded_under_one_name():
+    upload = _step("Upload the release")
+    download = _step("Download the release", "publish")
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert upload["if"] == "steps.build.outputs.changed == 'true'"
+    assert upload["with"] == {
+        "name": "kb-release",
+        "path": "${{ runner.temp }}/release",
+        "retention-days": 5,
+        "if-no-files-found": "error",
+    }
+    assert download["with"] == {"name": "kb-release", "path": "${{ runner.temp }}/release"}
+
+
+def test_kb_release_workflow__publish_checks__run_before_any_step_that_runs_gh():
+    # The tag and the asset names are untrusted build output; nothing may use them first.
+    names = [step["name"] for step in _steps("publish")]
+    assert names[0] == "Check the tag"
+    gh_indexes = [i for i, step in enumerate(_steps("publish")) if _runs_gh(step)]
+    assert gh_indexes, "publish runs no gh, so this test would pass vacuously"
+    assert names.index("Check the assets") < min(gh_indexes)
+
+
+@pytest.mark.parametrize(
+    ("tag", "accepted"),
+    [("kb-2026-11-11", True), ("v0.3.0", False), ("kb-2026-11-11; x", False), ("kb-2026-11-11\n", False), ("", False)],
+)
+def test_kb_release_workflow__check_the_tag__refuses_anything_but_a_kb_date(tag, accepted):
+    result = _run_bash(_step("Check the tag", "publish")["run"], env={"TAG": tag})
+    assert (result.returncode == 0) is accepted, result
+    if not accepted:
+        assert "refusing to publish" in result.stdout + result.stderr
+
+
+_TAG = "kb-2026-11-11"
+_LATEST = f"{_TAG}\nschema 7\nsha256 {'a' * 64}\n"
+_ASSETS = ["release.json", "SHA256SUMS"]
+
+
+def _release_dir(tmp_path, listed):
+    # Holds exactly the files a build writes for _ASSETS, so a passing check is the control
+    # every refusal case below differs from by one thing.
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / "release.json").write_text("{}\n")
+    (release / "SHA256SUMS").write_text("sums\n")
+    (release / "notes.md").write_text("notes\n")
+    (release / "LATEST").write_text(_LATEST)
+    (release / "assets.txt").write_text("".join(f"{line}\n" for line in listed))
+    return release
+
+
+def _check_assets(tmp_path):
+    env = {"RUNNER_TEMP": str(tmp_path), "TAG": _TAG}
+    return _run_bash(_step("Check the assets", "publish")["run"], env=env)
+
+
+def _assert_refused(result):
+    assert result.returncode != 0, result
+    assert "refusing to publish" in result.stdout + result.stderr
+
+
+def test_kb_release_workflow__check_the_assets__writes_basenames_and_refuses_unsafe_names(tmp_path):
+    # assets.txt holds absolute paths on the build runner; publish uploads by basename.
+    _release_dir(tmp_path, [f"/home/runner/work/_temp/release/{name}" for name in _ASSETS])
+    result = _check_assets(tmp_path)
+    assert result.returncode == 0, result
+    assert (tmp_path / "assets.checked").read_text() == "release.json\nSHA256SUMS\n"
+
+
+@pytest.mark.parametrize("listed", ["-rf", "a/b", "missing.txt", "link.json", None])
+def test_kb_release_workflow__check_the_assets__refuses_an_unsafe_or_empty_list(tmp_path, listed):
+    # Each case is refused by one guard alone: "-rf" and the symlink name real, listed files,
+    # and the symlink points at a regular one. "a/b" reduces to "b", which is refused as
+    # missing. The empty list leaves no unlisted asset behind for the download sweep to find.
+    release = _release_dir(tmp_path, [*_ASSETS, listed] if listed else [])
+    if listed is None:
+        (release / "release.json").unlink()
+        (release / "SHA256SUMS").unlink()
+    if listed == "-rf":
+        (release / "-rf").write_text("x\n")
+    if listed == "link.json":
+        (release / "link.json").symlink_to(release / "release.json")
+    _assert_refused(_check_assets(tmp_path))
+
+
+@pytest.mark.parametrize("extra", [".git/config", ".hidden", "extra.txt", "sub/release.json", "sub/"])
+def test_kb_release_workflow__check_the_assets__refuses_a_download_holding_anything_unchecked(tmp_path, extra):
+    # git run with the artifact as its working directory reads a .git there, and its config
+    # can run any command with the step's GH_TOKEN in the environment.
+    release = _release_dir(tmp_path, _ASSETS)
+    (release / extra).parent.mkdir(parents=True, exist_ok=True)
+    if extra.endswith("/"):
+        (release / extra).mkdir()
+    else:
+        (release / extra).write_text("[core]\n\tsshCommand = sh -c 'env > PWNED'\n")
+    _assert_refused(_check_assets(tmp_path))
+
+
+def _draft_filter():
+    jq = shutil.which("jq")
+    assert jq, "jq is required: it ships on GitHub's ubuntu runners and runs the publish job's draft filter"
+    return jq, _step("Replace unpublished drafts", "publish")["env"]["DRAFT_FILTER"]
+
+
+# The hostile first page from the old decide regression, then a second page.
+_LISTING_PAGES = [
+    [
+        {"id": 1, "tag_name": "kb-2026-09-29", "draft": True},
+        {"id": 2, "tag_name": "kb-2026-09-29/../v0.1.0", "draft": True},
+        {"id": 3, "tag_name": "v0.1.0", "draft": True},
+        {"id": 4, "tag_name": "kb-2026-09-28", "draft": False},
+        {"id": "5; rm", "tag_name": "kb-2026-09-27", "draft": True},
+        {"id": True, "tag_name": "kb-2026-09-26", "draft": True},
+        {"id": 0, "tag_name": "kb-2026-09-25", "draft": True},
+        {"id": -1, "tag_name": "kb-2026-09-24", "draft": True},
+    ],
+    [
+        {"id": 7, "tag_name": "kb-2026-09-20", "draft": True},
+        {"id": 8.5, "tag_name": "kb-2026-09-19", "draft": True},
+        {"id": 9, "tag_name": "kb-2026-09-18\n", "draft": True},
+        {"id": 10, "tag_name": ["kb-2026-09-17"], "draft": True},
+    ],
+]
+
+
+def test_kb_release_workflow__draft_filter__selects_only_positive_int_kb_draft_ids_across_pages():
+    # gh api --paginate prints one JSON array per page, back to back.
+    jq, program = _draft_filter()
+    pages = "".join(json.dumps(page) + "\n" for page in _LISTING_PAGES)
+    # S603: argv is jq plus this repository's own workflow text, never external input.
+    result = subprocess.run([jq, "-r", program], input=pages, capture_output=True, text=True, check=False)  # noqa: S603
+    # jq's exit status reflects only the last page, and an error abandons the rest of its own
+    # page, so a filter that errors on one entry silently skips drafts after it.
+    assert result.returncode == 0, result
+    assert result.stderr == ""
+    assert result.stdout == "1\n7\n"
+
+
+def test_kb_release_workflow__replace_drafts__lists_every_page():
+    lines = _logical_lines(_step("Replace unpublished drafts", "publish")["run"])
+    listing = [line for line in lines if "gh api" in line and "releases?per_page=" in line]
+    assert len(listing) == 1, lines
+    assert "--paginate" in listing[0].split()
+
+
+_GH_STUB = """
+gh() {
+  case "$*" in
+    *--paginate*) [ -n "$LIST_FAILS" ] && return 1; cat "$PAGES" ;;
+    *"--jq .draft"*) echo "$DRAFT_ANSWER" ;;
+    *"-X DELETE"*) echo "$*" >> "$DELETED" ;;
+    *) return 1 ;;
+  esac
+}
+"""
+
+
+def _replace_drafts(tmp_path, list_fails=False, draft_answer="true"):
+    _, program = _draft_filter()
+    pages = tmp_path / "pages.json"
+    pages.write_text("".join(json.dumps(page) + "\n" for page in _LISTING_PAGES))
+    env = {
+        "RUNNER_TEMP": str(tmp_path),
+        "GH_REPO": "owner/repo",
+        "DRAFT_FILTER": program,
+        "PAGES": str(pages),
+        "DELETED": str(tmp_path / "deleted"),
+        "LIST_FAILS": "1" if list_fails else "",
+        "DRAFT_ANSWER": draft_answer,
+    }
+    return _run_bash(_GH_STUB + _step("Replace unpublished drafts", "publish")["run"], env=env)
+
+
+def test_kb_release_workflow__replace_drafts__refuses_and_deletes_nothing_when_a_listed_draft_was_published(
+    tmp_path,
+):
+    result = _replace_drafts(tmp_path, draft_answer="false")
+    assert result.returncode != 0, result
+    assert "refusing to delete" in result.stdout + result.stderr
+    assert not (tmp_path / "deleted").exists()
+
+
+@pytest.mark.parametrize("list_fails", [False, True])
+def test_kb_release_workflow__replace_drafts__deletes_only_filtered_drafts_and_fails_on_a_failed_listing(
+    tmp_path, list_fails
+):
+    result = _replace_drafts(tmp_path, list_fails=list_fails)
+    deleted = tmp_path / "deleted"
+    if list_fails:
+        assert result.returncode != 0, result
+        assert not deleted.exists()
+    else:
+        assert result.returncode == 0, result
+        assert (
+            deleted.read_text()
+            == "api -X DELETE repos/owner/repo/releases/1\napi -X DELETE repos/owner/repo/releases/7\n"
+        )
+
+
+def test_kb_release_workflow__draft_release__uploads_the_checked_files_by_path_from_outside_the_download(
+    tmp_path,
+):
+    # gh run inside the download would ask git there for the tag, with GH_TOKEN in its env.
+    release = _release_dir(tmp_path, [])
+    (tmp_path / "assets.checked").write_text("release.json\nSHA256SUMS\n")
+    calls = tmp_path / "calls"
+    stub = 'gh() { printf "%s|%s\\n" "$PWD" "$*" >> "$CALLS"; }\n'
+    env = {
+        "RUNNER_TEMP": str(tmp_path),
+        "GH_REPO": "owner/repo",
+        "TAG": _TAG,
+        "GITHUB_SHA": "abc123",
+        "CALLS": str(calls),
+    }
+    result = _run_bash(stub + _step("Draft release", "publish")["run"], env=env, cwd=release)
+    assert result.returncode == 0, result
+    assert calls.read_text() == (
+        f"{tmp_path}|release create {_TAG} --repo owner/repo --draft --target abc123 --title Knowledge base {_TAG} "
+        f"--notes-file {release}/notes.md {release}/release.json {release}/SHA256SUMS\n"
+    )
+
+
+# A command ends at a shell operator or a closing $( ); each gh call is checked on its own.
+_COMMAND_BOUNDARY = re.compile(r"\$\(|\)|`|;|&&|\|\|?")
+
+
+def _gh_calls(job):
+    for step in _steps(job):
+        for line in _logical_lines(step.get("run", "")):
+            for command in _COMMAND_BOUNDARY.split(line):
+                match = _GH_COMMAND.search(command)
+                if match:
+                    yield step["name"], command[command.index("gh", match.start()) :].strip()
+
+
+def test_kb_release_workflow__gh_calls_in_publish_and_report__name_the_repository_explicitly():
+    # Without a repository named, gh asks git in its working directory, and that git runs
+    # with the step's GH_TOKEN in its environment and reads whatever .git is there.
+    calls = [call for job in ("publish", "report") for call in _gh_calls(job)]
+    subcommands = [command.split()[1] for _, command in calls]
+    assert sorted(subcommands) == ["api", "api", "api", "auth", "cache", "issue", "issue", "issue", "label", "release"]
+    for name, command in calls:
+        if command == "gh auth setup-git":
+            continue
+        if command.split()[1] == "api":
+            assert '"repos/$GH_REPO/' in command, (name, command)
+        else:
+            assert '--repo "$GH_REPO"' in command, (name, command)
+
+
+def _replace_with_symlink(release, name):
+    # The target is a valid copy, so only the symlink test can refuse it.
+    target = release.parent / f"{name}.target"
+    target.write_text((release / name).read_text())
+    (release / name).unlink()
+    (release / name).symlink_to(target)
+
+
+@pytest.mark.parametrize("name", ["assets.txt", "notes.md", "LATEST"])
+@pytest.mark.parametrize("change", ["missing", "symlink"])
+def test_kb_release_workflow__check_the_assets__refuses_a_control_file_that_is_not_a_plain_file(tmp_path, name, change):
+    # The token steps read notes.md into the draft and push LATEST to a public branch, so a
+    # symlink to /proc/self/environ there would publish the step's GH_TOKEN. assets.txt is
+    # read before the download sweep, so it is checked first.
+    release = _release_dir(tmp_path, _ASSETS)
+    if change == "missing":
+        (release / name).unlink()
+    else:
+        _replace_with_symlink(release, name)
+    _assert_refused(_check_assets(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "latest",
+    [
+        f"kb-2026-11-10\nschema 7\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema seven\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema 7 GH_TOKEN=secret\nsha256 {'a' * 64}\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 63}\n",
+        f"{_TAG}\nschema 7\nsha256 {'A' * 64}\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 64}\nGH_TOKEN=secret\n",
+        f"{_TAG}\nschema 7\n",
+        f"{_TAG}\nschema 7\nsha256 {'a' * 64} GH_TOKEN=secret\n",
+    ],
+    ids=[
+        "other_tag",
+        "schema_not_a_number",
+        "schema_trailing_text",
+        "short_sha",
+        "uppercase_sha",
+        "extra_line",
+        "two_lines",
+        "trailing_text",
+    ],
+)
+def test_kb_release_workflow__check_the_assets__refuses_latest_not_in_the_package_format(tmp_path, latest):
+    release = _release_dir(tmp_path, _ASSETS)
+    (release / "LATEST").write_text(latest)
+    _assert_refused(_check_assets(tmp_path))
+
+
+def _git():
+    git = shutil.which("git")
+    assert git, "git is required: it ships on GitHub's ubuntu runners and records kb/LATEST"
+    return git
+
+
+def _git_env(tmp_path, remote):
+    # Only this config is read, so the developer's own (commit signing included) never is.
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / ".gitconfig"
+    config.write_text(
+        f'[url "file://{remote}"]\n\tinsteadOf = https://github.com/owner/repo\n'
+        "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n"
+    )
+    return {
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "GIT_CONFIG_GLOBAL": str(config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+
+
+_SEED_KB_LATEST = """
+git init -q --bare "$REMOTE"
+[ -z "$SEED" ] && exit 0
+git init -q "$SEED"
+cd "$SEED"
+git checkout -q -b kb-latest
+mkdir kb
+echo old > kb/LATEST
+echo kept > kept.txt
+git add kb/LATEST kept.txt
+git -c user.name=Seed -c user.email=seed@example.invalid commit -q -m seed
+git push -q "$REMOTE" kb-latest
+"""
+
+
+@pytest.mark.parametrize("branch_exists", [False, True])
+def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_kb_latest(tmp_path, branch_exists):
+    git = _git()
+    _release_dir(tmp_path, _ASSETS)
+    remote = tmp_path / "remote.git"
+    env = {
+        **_git_env(tmp_path, remote),
+        "REMOTE": str(remote),
+        "SEED": str(tmp_path / "seed") if branch_exists else "",
+        "RUNNER_TEMP": str(tmp_path),
+        "GH_REPO": "owner/repo",
+        "TAG": _TAG,
+    }
+    seeded = _run_bash(_SEED_KB_LATEST, env=env, timeout=60)
+    assert seeded.returncode == 0, seeded
+    stub = 'gh() { [ "$*" = "auth setup-git" ]; }\n'
+    result = _run_bash(stub + _step("Record kb/LATEST on kb-latest", "publish")["run"], env=env, timeout=60)
+    assert result.returncode == 0, result
+
+    def remote_git(*args):
+        # S603: argv is git plus fixed arguments against this test's own bare repository.
+        done = subprocess.run(  # noqa: S603
+            [git, "--git-dir", str(remote), *args],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, **env},
+        )
+        return done.stdout
+
+    assert remote_git("show", "kb-latest:kb/LATEST") == _LATEST
+    assert remote_git("log", "-1", "--format=%s", "kb-latest") == f"Record draft {_TAG}\n"
+    if branch_exists:
+        # The new commit builds on the branch rather than replacing it.
+        assert remote_git("show", "kb-latest:kept.txt") == "kept\n"
+        assert remote_git("log", "-1", "--format=%s", "kb-latest^") == "seed\n"
+    else:
+        assert remote_git("rev-list", "--count", "kb-latest") == "1\n"

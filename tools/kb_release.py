@@ -50,21 +50,6 @@ def _reasons(listing, check_exit, event, previous, version):
     return reasons
 
 
-def _kb_drafts(listing):
-    # type(...) is int, not isinstance: bool subclasses int, and a listing's "id" must be a
-    # real release id, never True/False.
-    return [
-        entry["id"]
-        for entry in listing
-        if isinstance(entry, dict)
-        and entry.get("draft")
-        and type(entry.get("id")) is int
-        and entry["id"] > 0
-        and isinstance(entry.get("tag_name"), str)
-        and releases.TAG_RE.fullmatch(entry["tag_name"])
-    ]
-
-
 # Six inputs, each one the workflow supplies separately; a bundle object would only rename them.
 def decide(listing, check_exit, event, previous, today, version):  # noqa: PLR0913
     reasons = _reasons(listing, check_exit, event, previous, version)
@@ -78,7 +63,6 @@ def decide(listing, check_exit, event, previous, today, version):  # noqa: PLR09
         "build": bool(reasons),
         "reasons": reasons,
         "tag": tag,
-        "delete_drafts": _kb_drafts(listing) if reasons else [],
     }
 
 
@@ -221,7 +205,6 @@ def _run(args):
             {
                 "build": str(decision["build"]).lower(),
                 "tag": decision["tag"],
-                "delete_drafts": " ".join(map(str, decision["delete_drafts"])),
             },
         )
         return

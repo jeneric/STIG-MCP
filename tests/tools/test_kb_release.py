@@ -26,24 +26,16 @@ def _listing(*entries):
 def test_decide__nothing_changed_and_current__does_not_build(tmp_path):
     listing = _listing(("kb-2026-09-28", False))
     decision = kb_release.decide(listing, 0, "schedule", {"built_with": "0.1.0"}, TODAY, "0.1.0")
-    assert decision == {"build": False, "reasons": [], "tag": f"kb-{TODAY}", "delete_drafts": []}
+    assert decision == {"build": False, "reasons": [], "tag": f"kb-{TODAY}"}
 
 
-def test_decide__nothing_changed_but_a_draft_waits__does_not_schedule_it_for_deletion():
-    listing = _listing(("kb-2026-09-28", False), ("kb-2026-09-27", True))
-    decision = kb_release.decide(listing, 0, "schedule", {"built_with": "0.1.0"}, TODAY, "0.1.0")
-    assert decision["build"] is False
-    assert decision["delete_drafts"] == []
-
-
-def test_decide__upstream_changed__builds_and_replaces_only_kb_drafts():
+def test_decide__upstream_changed_with_drafts_waiting__builds():
     listing = _listing(("kb-2026-09-28", False), ("kb-2026-09-29", True))
     listing.append({"id": 99, "tag_name": "v0.2.0", "draft": True, "prerelease": False, "assets": []})
     decision = kb_release.decide(listing, 10, "schedule", {"built_with": "0.1.0"}, TODAY, "0.1.0")
     assert decision["build"] is True
     assert decision["reasons"] == ["upstream sources changed since the cached fetch"]
-    draft_id = next(e["id"] for e in listing if e["tag_name"] == "kb-2026-09-29")
-    assert decision["delete_drafts"] == [draft_id]
+    assert "delete_drafts" not in decision
 
 
 def test_decide__no_published_release_for_this_schema__builds_even_with_a_draft_waiting():
@@ -82,7 +74,7 @@ def test_decide__today_already_published__is_refused_when_building():
 def test_decide__today_already_published_but_nothing_to_build__does_not_raise():
     listing = _listing((f"kb-{TODAY}", False))
     decision = kb_release.decide(listing, 0, "schedule", {"built_with": "0.1.0"}, TODAY, "0.1.0")
-    assert decision == {"build": False, "reasons": [], "tag": f"kb-{TODAY}", "delete_drafts": []}
+    assert decision == {"build": False, "reasons": [], "tag": f"kb-{TODAY}"}
 
 
 _SOURCES = {"entries": {"U_Foo_V1R1_STIG.zip": "a" * 64}, "public": {"attack": "b" * 64}}
@@ -300,7 +292,7 @@ def test_main__decide_with_github_output__appends_the_outputs(tmp_path, monkeypa
     lines = output.read_text().splitlines()
     assert "build=true" in lines
     assert f"tag=kb-{TODAY}" in lines
-    assert "delete_drafts=1" in lines
+    assert not any(line.startswith("delete_drafts=") for line in lines)
 
 
 def test_main__decide_refused__exits_1_with_the_reason_on_stderr(tmp_path, capsys):
