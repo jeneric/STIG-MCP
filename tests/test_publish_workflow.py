@@ -33,6 +33,13 @@ def test_publish_workflow__every_action__is_pinned_by_commit_sha():
     assert [u for u in uses if not _SHA_PIN.fullmatch(u.split(" ")[0])] == []
 
 
+def test_publish_workflow__setup_uv__never_restores_or_saves_the_shared_uv_cache():
+    # The cache is shared with workflows that run upstream code; "auto" enables it on hosted runners.
+    setups = [step for job in _jobs() for step in _steps(job) if step.get("uses", "").startswith("astral-sh/setup-uv@")]
+    assert setups, "no setup-uv steps found, so this test would pass on an empty workflow"
+    assert [step.get("with", {}).get("enable-cache") for step in setups] == [False] * len(setups)
+
+
 def test_publish_workflow__triggers__are_manual_dispatch_and_version_tags_only():
     triggers = _doc().get("on", _doc().get(True))  # PyYAML reads the bare key on as True
     assert set(triggers) == {"workflow_dispatch", "push"}
