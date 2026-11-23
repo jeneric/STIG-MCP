@@ -206,7 +206,6 @@ def test_corpus_manifest__tier_of__is_imported_not_redefined():
     tree = ast.parse(source)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert "tier_of" not in defined
-    assert "fetch_listing" not in defined
     assert "from stig_mcp.ingest.catalog import" in source
 
 

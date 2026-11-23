@@ -134,11 +134,12 @@ _INSTALL_HEADING = "Install a prebuilt knowledge base"
 def test_operations__fetch_retry__matches_the_constants():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
-    match = re.search(
+    sentence = (
         r"tries each download, HEAD request and catalog read up to (\d+) times, "
-        r"waiting (\d+), (\d+) and (\d+)\s+seconds",
-        OPERATIONS.read_text(),
+        r"waiting (\d+), (\d+) and (\d+) seconds"
     )
+    # The prose is wrapped, so any space in the sentence may be a line break.
+    match = re.search(sentence.replace(" ", r"\s+"), OPERATIONS.read_text())
     assert match, "the retry sentence must keep its extractable form"
     assert int(match.group(1)) == fetch.RETRY_ATTEMPTS
     assert tuple(int(match.group(n)) for n in (2, 3, 4)) == fetch.RETRY_BACKOFF
@@ -147,7 +148,9 @@ def test_operations__fetch_retry__matches_the_constants():
 def test_operations__drop_limit__matches_the_constant():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
-    match = re.search(r"more than (\d+)% of the recorded files \(`MAX_DROP_FRACTION`", OPERATIONS.read_text())
+    match = re.search(
+        r"more\s+than\s+(\d+)%\s+of\s+the\s+recorded\s+files\s+\(`MAX_DROP_FRACTION`", OPERATIONS.read_text()
+    )
     assert match, "the --drop-withdrawn paragraph must state the limit as 'more than N% of the recorded files'"
     assert int(match.group(1)) == round(fetch.MAX_DROP_FRACTION * 100)
 
@@ -163,9 +166,9 @@ def test_operations__catalog_class_id_remedy__names_the_constant_and_the_method(
 def test_operations__retried_http_codes__match_the_transient_codes():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
-    match = re.search(r"or HTTP ((?:\d{3}(?:, | or ))*\d{3})\.", OPERATIONS.read_text())
+    match = re.search(r"or\s+HTTP\s+((?:\d{3}(?:,\s+|\s+or\s+))*\d{3})\.", OPERATIONS.read_text())
     assert match, "the retry paragraph must list the retried codes as 'or HTTP a, b or c.'"
-    codes = {int(code) for code in re.split(r", | or ", match.group(1))}
+    codes = {int(code) for code in re.split(r",\s+|\s+or\s+", match.group(1))}
     assert codes == fetch._TRANSIENT_HTTP_CODES
 
 
@@ -175,7 +178,7 @@ def test_operations__release_schedule__matches_the_workflow_cron():
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "kb-release.yml").read_text())
     cron = workflow.get("on", workflow.get(True))["schedule"][0]["cron"]
     minute, hour, _day, _month, weekday = cron.split()
-    match = re.search(r"every (\w+day) at (\d{2}):(\d{2}) UTC", OPERATIONS.read_text())
+    match = re.search(r"every\s+(\w+day)\s+at\s+(\d{2}):(\d{2})\s+UTC", OPERATIONS.read_text())
     assert match, "the schedule must read 'every <weekday> at HH:MM UTC'"
     days = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
     assert days.index(match.group(1)) == int(weekday) % 7  # cron: 0 and 7 are both Sunday
