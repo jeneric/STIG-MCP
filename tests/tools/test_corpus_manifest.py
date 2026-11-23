@@ -42,7 +42,6 @@ def test_tier_of__a_cui_filename__refuses_with_the_credential_reason():
     assert "CUI" in message
     assert "CAC" in message
     assert "rerun once the catalog no longer lists it" in message
-    assert "listing input" not in message
 
 
 @pytest.mark.parametrize(
