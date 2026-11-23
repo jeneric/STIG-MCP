@@ -251,8 +251,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add kb/LATEST
-          git commit -m "Record draft $TAG"
-          git push origin kb-latest
+          # A rerun of the same build records the same LATEST, which leaves nothing to commit.
+          if git diff --cached --quiet; then
+            echo "kb-latest already records this kb/LATEST; nothing to push"
+          else
+            git commit -m "Record draft $TAG"
+            git push origin kb-latest
+          fi
 
   # A job timeout ends as cancelled, not failed, and a job-level cancelled() is true only
   # when the whole run is canceled, so the needed jobs' results are read directly. The
