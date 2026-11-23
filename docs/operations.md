@@ -153,12 +153,11 @@ a zip through DISA's S3 mirror, or with a doubled slash in the path; the fetch k
 filename from such a row and asks `ZIP_BASE` for it, never the mirror. A `.zip` link on neither
 path is skipped and named in one warning on standard error. The catalog gives names and upload
 dates but no sizes, so the fetch sends one HEAD request per selected file and takes its
-`Content-Length` as the exact length. Measured against DISA's former directory listing on 2026-08-14,
-that is 272 files and about 0.95 GiB; both figures drift as DISA publishes, so treat them as a
-scale rather than a number to check against.
-`--delay` spaces the downloads by that many seconds, 0.25 by default, because every one of
-them goes to a single government host. The HEAD requests go back to back, with no delay
-between them.
+`Content-Length` as the exact length. Measured against DISA's former directory listing on
+2026-08-14, that is 272 files and about 0.95 GiB; both figures drift as DISA publishes, so
+treat them as a scale rather than a number to check against. `--delay` spaces the downloads by
+that many seconds, 0.25 by default, because every one of them goes to a single government host.
+The HEAD requests go back to back, with no delay between them.
 
 Before the first byte it checks free space, and refuses if there is less than 2 GiB or less
 than twice what this run would transfer, whichever is larger. The floor covers the ingest's
@@ -172,23 +171,24 @@ differ and the next fetch downloads the new copy. An interrupted fetch therefore
 resumes rather than starting over: run the same command again. The manifest is written even
 when a download fails, which is what makes that work.
 
-A single dropped connection need not end the run at all. The DISA half of the fetch
-tries each download, HEAD request and catalog read up to 4 times, waiting 5, 15 and 45
-seconds between tries, when the failure is one a retry can heal: a reset, refused or dropped
-connection, a timeout, a DNS or other network error, or HTTP 429, 500, 502, 503 or 504. A certificate
-error, any other HTTP error and the refusal of a `CUI_` URL fail at once. Each retry prints
-one line to stderr naming the file, or the catalog, and the attempt it is about to make. This
-holds for a plain fetch and for `--refresh` alike. The three public sources are not retried,
-and neither is `--check`, which reports a source it cannot reach instead.
+A single dropped connection need not end the run at all. The DISA half of the fetch tries each
+download, HEAD request and catalog read up to 4 times, waiting 5, 15 and 45 seconds between
+tries, when the failure is one a retry can heal: a reset, refused or dropped connection, a
+timeout, a DNS or other network error, or HTTP 429, 500, 502, 503 or 504. A certificate error,
+any other HTTP error and the refusal of a `CUI_` URL fail at once. Each retry prints one line
+to stderr naming the file, or the catalog, and the attempt it is about to make. This holds for
+a plain fetch and for `--refresh` alike. The three public sources are not retried, and neither
+is `--check`, which reports a source it cannot reach instead.
 
-DISA publishes the CCI list as `CCI_List.zip`, whose member `CCI_List.xml` the ingest reads
-as `U_CCI_List.xml`, so the fetch extracts that one member under that name into the sources
-directory and prints its path with the rest. It extracts from whatever archive is on disk rather than only from one it has just
-downloaded, so a run that skips the download because the manifest still matches restores a
-deleted XML too. Leave the zip where it is: the ingest opens it, finds no XCCDF benchmark,
-and logs one line about it. That costs about 0.04 seconds: the ingest decompresses and parses
-the 3.2 MB list to find nothing. Deleting the zip costs the whole download again on the next
-fetch, because the manifest would no longer describe what is on disk.
+DISA publishes the CCI list as `CCI_List.zip`, whose member `CCI_List.xml` the ingest reads as
+`U_CCI_List.xml`, so the fetch extracts that one member under that name into the sources
+directory and prints its path with the rest. It extracts from whatever archive is on disk
+rather than only from one it has just downloaded, so a run that skips the download because the
+manifest still matches restores a deleted XML too. Leave the zip where it is: the ingest opens
+it, finds no XCCDF benchmark, and logs one line about it. That costs about 0.04 seconds: the
+ingest decompresses and parses the 3.2 MB list to find nothing. Deleting the zip costs the
+whole download again on the next fetch, because the manifest would no longer describe what is
+on disk.
 
 When the DISA half fails, the command prints the artifacts to fetch by hand and then
 re-raises, so a half-finished fetch is never mistaken for a finished one. **Ctrl-C is the
@@ -200,9 +200,9 @@ from GitHub before it ever reaches DISA.
 
 #### If the catalog read fails
 
-Four errors come from reading the catalog, and each says what to check. The first three mean
-DISA changed or broke the catalog; the fourth can also be this machine's access or a transient
-failure.
+Five errors come from reading the catalog, and each says what to check. The first four mean
+DISA changed or broke the catalog, or the response read was not that catalog; the fifth can
+also be this machine's access or a transient failure.
 
 - **"The Apex class id changes when DISA redeploys it".** The catalog call is addressed to
   an Apex class by record id, and DISA changes that id when it redeploys the page. Update
@@ -212,12 +212,18 @@ failure.
   `getApexInvoker(...)` line for `getCyberDocumentCatalogByDocumentLibrary`: the class id is
   its first argument, in the form `@udd/01p...`.
 - **"no zip rows".** The call worked, but no row has a `DownloadLink` under `ZIP_BASE`, or
-  under that path on a mirror, ending in `.zip`. The row shape or the download location changed, not the class id: compare
-  a row of the live response with `DownloadLink` and `ZIP_BASE` in the same file.
+  under that path on a mirror, ending in `.zip`. The row shape or the download location
+  changed, not the class id: compare a row of the live response with `DownloadLink` and
+  `ZIP_BASE` in the same file.
 - **"a DownloadLink that is not a valid URL".** One catalog row carries a link that does not
   parse, such as a malformed IPv6 host, and the message quotes it. Nothing can say which file
   it names, so the whole response is refused rather than that row dropped unseen. Nothing on
   this side fixes it: rerun once DISA corrects the row.
+- **"it must be a plain filename, not a path".** A catalog link names a file inside a
+  directory, or carries a drive letter or a `..` step. Every name is joined onto the sources
+  directory, so the whole response is refused before anything is written or deleted. DISA
+  links each zip by its plain filename, so check that `CATALOG_URL` in
+  `stig_mcp/ingest/catalog.py` still answers with DISA's STIG catalog, then rerun.
 - **"HEAD ... which the cyber.mil catalog lists, failed".** The catalog lists a file, but the
   HEAD request sizing it failed. The message names the file and the URL asked, which is always
   under `ZIP_BASE`. A 404 or 410 means the catalog lists a file the download host no longer
@@ -249,13 +255,13 @@ otherwise see those analytics as undetectable. Each correction names its analyti
 misspelling, so once ATT&CK fixes a name the correction no longer matches and does nothing.
 `defense_details` shows the corrected name for those two analytics.
 
-The knowledge base carries a schema version. The server starts against a knowledge base
-built by an older release, but never answers from it: it reports the outdated schema and
-tells you to re-run the ingest. Rebuilding is always the recovery: the knowledge base is
-derived entirely from the sources above. The current schema is `7`. Schema 7 adds ATT&CK's mitigations and detection strategies
-(see "MITRE ATT&CK mitigations and detections" below); schema 6 began recording every
-input file with its SHA-256 in `source_files`, and carries this project's license files in
-`notices`, so the notices travel with any copy of the knowledge base.
+The knowledge base carries a schema version. The server starts against a knowledge base built
+by an older release, but never answers from it: it reports the outdated schema and tells you to
+re-run the ingest. Rebuilding is always the recovery: the knowledge base is derived entirely
+from the sources above. The current schema is `7`. Schema 7 adds ATT&CK's mitigations and
+detection strategies (see "MITRE ATT&CK mitigations and detections" below); schema 6 began
+recording every input file with its SHA-256 in `source_files`, and carries this project's
+license files in `notices`, so the notices travel with any copy of the knowledge base.
 
 ## MITRE ATT&CK mitigations and detections
 
@@ -447,16 +453,16 @@ because that copy is coverage that cannot be fetched again, and the server alrea
 answer that came from an artifact the current library no longer ships. Those retentions are
 counted in the closing summary.
 
-`--drop-withdrawn` changes exactly that, and applies only with `--refresh`: given alone it is
-a usage error and exits 2. It also deletes every DISA file the manifest recorded that the
-catalog no longer carries and no arrival superseded, and names each one it dropped. The CCI list
-is the one exception, kept because the ingest cannot run without it, and a file the manifest
-never recorded, such as a zip you placed by hand, is never touched. It refuses, before any
-DISA download, when the drop would delete more than 25% of the recorded files (`MAX_DROP_FRACTION`
+`--drop-withdrawn` changes exactly that, and applies only with `--refresh`: given alone it is a
+usage error and exits 2. It also deletes every DISA file the manifest recorded that the catalog
+no longer carries and no arrival superseded, and names each one it dropped. The CCI list is the
+one exception, kept because the ingest cannot run without it, and a file the manifest never
+recorded, such as a zip you placed by hand, is never touched. It refuses, before any DISA
+download, when the drop would delete more than 25% of the recorded files (`MAX_DROP_FRACTION`
 in `stig_mcp/ingest/fetch.py`), because a catalog response cut short lists only part of the
-products and would otherwise delete most of the corpus. Rerun once the response is whole. The flag exists for
-building a release only from what DISA publishes now, which is how the release pipeline below
-uses it. For an operator the default is the right one: keep withdrawn products.
+products and would otherwise delete most of the corpus. Rerun once the response is whole. The
+flag exists for building a release only from what DISA publishes now, which is how the release
+pipeline below uses it. For an operator the default is the right one: keep withdrawn products.
 
 A suggested cadence is `--check` quarterly, since that is how often the library
 compilation moves, and `--refresh` followed by `stig-mcp-ingest` when it exits 10.
@@ -469,19 +475,19 @@ never publishes anything: what it makes is a draft. GitHub disables a public rep
 scheduled workflows after 60 days with no repository activity; re-enable it from the Actions
 tab if that happens.
 
-A run is three jobs. The `build` job holds a read-only token and does the check, the
-decision, the refresh, the ingest, the tests, the verification and the packaging. The
-`publish` job holds a token that can write the repository's contents. It replaces `kb-*`
-drafts, drafts the release and records `kb/LATEST`. The `report` job holds a token that
-can write issues and delete caches, and runs only when `build` or `publish` failed or was
-canceled. Neither write job runs the project's code: they run only `gh`, `git` and `jq`
-from the runner image. Besides the flag that says whether anything changed, the build job
-hands `publish` only a tag and the release files, and `publish` checks the tag, the files
-and their names before any step that holds the token. It refuses a download holding any
-other file or directory, a `.git` among them, and every `gh` call names the repository, so
-none asks `git` to look inside the download. So code that takes over the fetch, the ingest
-or the tests can leave nothing that a step holding a write token would run or read as
-configuration. `report` reads nothing the build job made.
+A run is three jobs. The `build` job holds a read-only token and does the check, the decision,
+the refresh, the ingest, the tests, the verification and the packaging. The `publish` job holds
+a token that can write the repository's contents. It replaces `kb-*` drafts, drafts the release
+and records `kb/LATEST`. The `report` job holds a token that can write issues and delete
+caches, and runs only when `build` or `publish` failed or was canceled. Neither write job runs
+the project's code: they run only `gh`, `git` and `jq` from the runner image. Besides the flag
+that says whether anything changed, the build job hands `publish` only a tag and the release
+files, and `publish` checks the tag, the files and their names before any step that holds the
+token. It refuses a download holding any other file or directory, a `.git` among them, and
+every `gh` call that reads or writes a release names the repository, so none asks `git` to look
+inside the download. So code that takes over the fetch, the ingest or the tests can leave
+nothing that a step holding a write token would run or read as configuration. `report` reads
+nothing the build job made.
 
 The build job restores the sources directory an earlier run cached and runs
 `stig-mcp-fetch --check` against it. `tools/kb_release.py` then decides from that exit code
@@ -900,10 +906,11 @@ directory walk.
 
 ### What a current library actually produces
 
-Measured by the [corpus conformance harness](../CONTRIBUTING.md#corpus-conformance-harness), over each of the nine published libraries
-paired with the sunset archive and the full loose corpus. **A build from any 2025 or 2026 library
-loses rules from three or four benchmarks. The first three rows below appear on every one of
-them; the last two are conditional on the library, as their `why` column says.**
+Measured by the [corpus conformance harness](../CONTRIBUTING.md#corpus-conformance-harness),
+over each of the nine published libraries paired with the sunset archive and the full loose
+corpus. **A build from any 2025 or 2026 library loses rules from three or four benchmarks. The
+first three rows below appear on every one of them; the last two are conditional on the
+library, as their `why` column says.**
 
 | loser | loses | to | why |
 |---|---|---|---|

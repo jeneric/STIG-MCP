@@ -2,9 +2,8 @@
 
 This module downloads no archives. The manifest it produces is the durable artifact: what
 DISA publishes changes continuously, so a recorded manifest is what makes a corpus run
-reproducible and resumable against one revision of it. DISA closed the directory listing
-that once named every file, and the cyber.mil catalog names only current ones, so a new
-manifest is a recorded base plus whatever the catalog adds."""
+reproducible and resumable against one revision of it. The cyber.mil catalog names only
+current archives, so a new manifest is a recorded base plus whatever the catalog adds."""
 
 import argparse
 import functools
@@ -149,13 +148,37 @@ def _parse_args():
             f"--out {args.out} is the base manifest. The base is a dated record and is never "
             f"overwritten; pass a new path to --out."
         )
-    base = json.loads(Path(args.base).read_text(encoding="utf-8"))
+    base = _load_base(parser, args.base)
     if base.get("source_url") != ZIP_BASE:
         parser.error(
             f"{args.base} was recorded from {base.get('source_url')!r}, but catalog entries are "
             f"joined onto {ZIP_BASE}. Pass a base manifest recorded from {ZIP_BASE}."
         )
     return args, base
+
+
+_ENTRY_KEYS = ("name", "href", "tier", "sha256", "size")
+
+
+def _load_base(parser, path):
+    """The base manifest at path, or a parser error naming what is wrong with it."""
+    try:
+        base = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as error:
+        parser.error(f"--base {path} cannot be read ({error}). Pass the path of a manifest recorded earlier.")
+    except ValueError as error:
+        parser.error(f"--base {path} is not valid JSON ({error}). Pass a manifest this tool wrote.")
+    entries = base.get("entries") if isinstance(base, dict) else None
+    if not isinstance(entries, list):
+        parser.error(f'--base {path} has no "entries" list. Pass a manifest this tool wrote.')
+    for index, entry in enumerate(entries):
+        missing = [key for key in _ENTRY_KEYS if not isinstance(entry, dict) or key not in entry]
+        if missing:
+            parser.error(
+                f"--base {path} entry {index} lacks {', '.join(missing)}; every entry needs "
+                f"{', '.join(_ENTRY_KEYS)}. Restore it from the manifest this tool wrote."
+            )
+    return base
 
 
 def main():

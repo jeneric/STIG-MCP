@@ -134,11 +134,12 @@ _INSTALL_HEADING = "Install a prebuilt knowledge base"
 def test_operations__fetch_retry__matches_the_constants():
     from stig_mcp.ingest import fetch  # noqa: PLC0415
 
-    match = re.search(
+    sentence = (
         r"tries each download, HEAD request and catalog read up to (\d+) times, "
-        r"waiting (\d+), (\d+) and (\d+)\s+seconds",
-        OPERATIONS.read_text(),
+        r"waiting (\d+), (\d+) and (\d+) seconds"
     )
+    # The prose is wrapped, so any space in the sentence may be a line break.
+    match = re.search(sentence.replace(" ", r"\s+"), OPERATIONS.read_text())
     assert match, "the retry sentence must keep its extractable form"
     assert int(match.group(1)) == fetch.RETRY_ATTEMPTS
     assert tuple(int(match.group(n)) for n in (2, 3, 4)) == fetch.RETRY_BACKOFF

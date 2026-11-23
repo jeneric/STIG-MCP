@@ -187,8 +187,9 @@ def tier_of(name):
     low = name.lower()
     if low.startswith("cui_"):
         raise ValueError(
-            f"Refusing to manifest {name!r}: CUI content requires a DOD PKI certificate (CAC) "
-            f"and is permanently out of scope for this tool. Remove it from the listing input."
+            f"Refusing to tier {name!r}: CUI content requires a DOD PKI certificate (CAC) and is "
+            f"permanently out of scope for this tool. Remove it from the base manifest; if DISA's "
+            f"public catalog lists it, fetching stops here until the catalog no longer does."
         )
     if not low.endswith(".zip"):
         return None

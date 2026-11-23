@@ -41,6 +41,8 @@ def test_tier_of__a_cui_filename__refuses_with_the_credential_reason():
     message = str(excinfo.value)
     assert "CUI" in message
     assert "CAC" in message
+    assert "base manifest" in message
+    assert "listing" not in message
 
 
 @pytest.mark.parametrize(
@@ -113,7 +115,8 @@ def test_merge__a_shared_name_whose_length_matches__keeps_sha256_and_size():
 def test_merge__a_shared_name_never_staged__is_kept_with_no_restage():
     name = "U_RHEL_9_V2R10_STIG.zip"
     unstaged = _staged(name, size=None, sha256=None)
-    manifest, report = corpus_manifest.merge(_base(unstaged), [_cat(name)], {})
+    # A length for it reaches merge's own size guard, which is what must keep it unstaged.
+    manifest, report = corpus_manifest.merge(_base(unstaged), [_cat(name)], {name: 101})
     assert _merged(manifest, name) == unstaged
     assert report["restaged"] == []
 
@@ -181,8 +184,19 @@ def test_merge__a_restage__does_not_mutate_the_base():
 
 
 def test_merge__the_base_source_url__is_carried_over():
-    manifest, _report = corpus_manifest.merge(_base(), [], {})
-    assert manifest["source_url"] == catalog.ZIP_BASE
+    base = _base()
+    base["source_url"] = "https://example.invalid/recorded/"
+    manifest, _report = corpus_manifest.merge(base, [], {})
+    assert manifest["source_url"] == "https://example.invalid/recorded/"
+
+
+def test_merge__unsorted_additions_and_restages__are_reported_sorted_by_name():
+    base = _base(_staged("U_Zebra_V1R1_STIG.zip"), _staged("U_Beta_V1R1_STIG.zip"))
+    catalog_entries = [_cat("U_Yak_V1R1_STIG.zip"), _cat("U_Alpha_V1R1_STIG.zip")]
+    lengths = {"U_Zebra_V1R1_STIG.zip": 101, "U_Beta_V1R1_STIG.zip": 101}
+    _manifest, report = corpus_manifest.merge(base, catalog_entries, lengths)
+    assert report["added"] == ["U_Alpha_V1R1_STIG.zip", "U_Yak_V1R1_STIG.zip"]
+    assert report["restaged"] == ["U_Beta_V1R1_STIG.zip", "U_Zebra_V1R1_STIG.zip"]
 
 
 class _HeadResponse:
@@ -339,6 +353,55 @@ def test_main__a_base_from_another_source_url__refuses_naming_both_urls(monkeypa
     assert "https://example.invalid/zips/" in err
     assert catalog.ZIP_BASE in err
     assert not (tmp_path / "out.json").exists()
+
+
+def _main_with_base_text(monkeypatch, tmp_path, base_path):
+    seen = {"catalog_calls": 0}
+    monkeypatch.setattr(corpus_manifest, "fetch_catalog", lambda **_kw: seen.update(catalog_calls=1))
+    out_path = tmp_path / "out.json"
+    monkeypatch.setattr("sys.argv", ["corpus_manifest", "--base", str(base_path), "--out", str(out_path)])
+    with pytest.raises(SystemExit):
+        corpus_manifest.main()
+    assert seen["catalog_calls"] == 0
+    assert not out_path.exists()
+
+
+def test_main__a_missing_base__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
+    missing = tmp_path / "absent.json"
+    _main_with_base_text(monkeypatch, tmp_path, missing)
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert "Traceback" not in err
+
+
+def test_main__a_base_that_is_not_json__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
+    base_path = tmp_path / "base.json"
+    base_path.write_text("{not json", encoding="utf-8")
+    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    err = capsys.readouterr().err
+    assert str(base_path) in err
+    assert "JSON" in err
+
+
+@pytest.mark.parametrize("missing_key", ["name", "href", "tier", "sha256", "size"])
+def test_main__a_base_entry_missing_a_key__refuses_naming_the_entry_and_key(monkeypatch, tmp_path, capsys, missing_key):
+    entry = _staged("U_RHEL_9_V2R10_STIG.zip")
+    del entry[missing_key]
+    base_path = tmp_path / "base.json"
+    base_path.write_text(json.dumps(_base(entry)), encoding="utf-8")
+    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    err = capsys.readouterr().err
+    assert missing_key in err
+    assert "entry 0" in err
+
+
+def test_main__a_base_with_no_entries_list__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
+    base_path = tmp_path / "base.json"
+    base_path.write_text(json.dumps({"source_url": catalog.ZIP_BASE}), encoding="utf-8")
+    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    err = capsys.readouterr().err
+    assert str(base_path) in err
+    assert "entries" in err
 
 
 def test_main__a_head_fails_partway__writes_nothing_and_names_the_file(monkeypatch, tmp_path):
