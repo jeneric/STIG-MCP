@@ -41,8 +41,8 @@ def test_tier_of__a_cui_filename__refuses_with_the_credential_reason():
     message = str(excinfo.value)
     assert "CUI" in message
     assert "CAC" in message
-    assert "base manifest" in message
-    assert "listing" not in message
+    assert "rerun once the catalog no longer lists it" in message
+    assert "listing input" not in message
 
 
 @pytest.mark.parametrize(
@@ -355,7 +355,7 @@ def test_main__a_base_from_another_source_url__refuses_naming_both_urls(monkeypa
     assert not (tmp_path / "out.json").exists()
 
 
-def _main_with_base_text(monkeypatch, tmp_path, base_path):
+def _main_refusing_base(monkeypatch, tmp_path, base_path):
     seen = {"catalog_calls": 0}
     monkeypatch.setattr(corpus_manifest, "fetch_catalog", lambda **_kw: seen.update(catalog_calls=1))
     out_path = tmp_path / "out.json"
@@ -368,7 +368,7 @@ def _main_with_base_text(monkeypatch, tmp_path, base_path):
 
 def test_main__a_missing_base__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
     missing = tmp_path / "absent.json"
-    _main_with_base_text(monkeypatch, tmp_path, missing)
+    _main_refusing_base(monkeypatch, tmp_path, missing)
     err = capsys.readouterr().err
     assert str(missing) in err
     assert "Traceback" not in err
@@ -377,10 +377,10 @@ def test_main__a_missing_base__refuses_naming_the_path(monkeypatch, tmp_path, ca
 def test_main__a_base_that_is_not_json__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
     base_path = tmp_path / "base.json"
     base_path.write_text("{not json", encoding="utf-8")
-    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    _main_refusing_base(monkeypatch, tmp_path, base_path)
     err = capsys.readouterr().err
     assert str(base_path) in err
-    assert "JSON" in err
+    assert "is not UTF-8 JSON" in err
 
 
 @pytest.mark.parametrize("missing_key", ["name", "href", "tier", "sha256", "size"])
@@ -389,16 +389,16 @@ def test_main__a_base_entry_missing_a_key__refuses_naming_the_entry_and_key(monk
     del entry[missing_key]
     base_path = tmp_path / "base.json"
     base_path.write_text(json.dumps(_base(entry)), encoding="utf-8")
-    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    _main_refusing_base(monkeypatch, tmp_path, base_path)
     err = capsys.readouterr().err
-    assert missing_key in err
-    assert "entry 0" in err
+    assert f"entry 0 lacks {missing_key};" in err
+    assert str(base_path) in err
 
 
 def test_main__a_base_with_no_entries_list__refuses_naming_the_path(monkeypatch, tmp_path, capsys):
     base_path = tmp_path / "base.json"
     base_path.write_text(json.dumps({"source_url": catalog.ZIP_BASE}), encoding="utf-8")
-    _main_with_base_text(monkeypatch, tmp_path, base_path)
+    _main_refusing_base(monkeypatch, tmp_path, base_path)
     err = capsys.readouterr().err
     assert str(base_path) in err
     assert "entries" in err

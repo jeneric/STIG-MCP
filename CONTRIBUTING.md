@@ -35,15 +35,16 @@ deliberate, occasional check, not something day-to-day development depends on.
 The published directory held 1,032 file rows when measured on 2026-08-14 from DISA's
 directory listing, which DISA no longer publishes: 613 benchmark-tier product zips, 10
 compilations, 323 adversarial, 70 junk, and 16 rows that are not zips at all and are tiered
-out. Junk is the largest tier by volume at 5.78 GiB, and the nine STIG Viewer desktop application archives that land there are only 1.31 GiB of it: the
-SCC scanner bundles are the bulk, so junk would still be the largest tier without them. The
-documented command below therefore runs several builds, not one: the default `benchmark` tier
-stages those 613 product zips, about 1.1 GiB by the sizes that listing advertised and confirmed
-against 612 of them staged on disk, and every one of them is reused across every build;
-`--tier compilation` separately stages all ten compilations, about 2.8 GiB, being nine
-historical SRG-STIG Library releases plus the Rev 4 sunset archive. The harness runs one
-build per library, nine builds today, each paired with the sunset archive (see below), so a
-full run means nine complete passes of the ingest pipeline over the product corpus.
+out. Junk is the largest tier by volume at 5.78 GiB, and the nine STIG Viewer desktop
+application archives that land there are only 1.31 GiB of it: the SCC scanner bundles are the
+bulk, so junk would still be the largest tier without them. The documented command below
+therefore runs several builds, not one: the default `benchmark` tier stages those 613 product
+zips, about 1.1 GiB by the sizes that listing advertised and confirmed against 612 of them
+staged on disk, and every one of them is reused across every build; `--tier compilation`
+separately stages all ten compilations, about 2.8 GiB, being nine historical SRG-STIG Library
+releases plus the Rev 4 sunset archive. The harness runs one build per library, nine builds
+today, each paired with the sunset archive (see below), so a full run means nine complete
+passes of the ingest pipeline over the product corpus.
 
 Four commands, run in order. The manifest step comes first because it downloads no
 archives. DISA has closed the directory listing that once named every file, and the cyber.mil

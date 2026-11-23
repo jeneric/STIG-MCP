@@ -167,7 +167,7 @@ def _load_base(parser, path):
     except OSError as error:
         parser.error(f"--base {path} cannot be read ({error}). Pass the path of a manifest recorded earlier.")
     except ValueError as error:
-        parser.error(f"--base {path} is not valid JSON ({error}). Pass a manifest this tool wrote.")
+        parser.error(f"--base {path} is not UTF-8 JSON ({error}). Pass a manifest this tool wrote.")
     entries = base.get("entries") if isinstance(base, dict) else None
     if not isinstance(entries, list):
         parser.error(f'--base {path} has no "entries" list. Pass a manifest this tool wrote.')
