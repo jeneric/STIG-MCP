@@ -34,6 +34,11 @@ def _step(name, job="build"):
     return next(step for step in _steps(job) if step.get("name") == name)
 
 
+def _inherited_env():
+    # A git hook exports GIT_DIR and friends, which would aim these tests' git at the caller's repository.
+    return {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+
+
 def _run_bash(script, env=None, cwd=None, timeout=None):
     # GitHub runs a step with no shell: override as `bash -e {0}`, without pipefail.
     bash = shutil.which("bash")
@@ -44,7 +49,7 @@ def _run_bash(script, env=None, cwd=None, timeout=None):
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, **(env or {})},
+        env={**_inherited_env(), **(env or {})},
         cwd=cwd,
         timeout=timeout,
     )
@@ -679,7 +684,8 @@ git init -q "$SEED"
 cd "$SEED"
 git checkout -q -b kb-latest
 mkdir kb
-echo old > kb/LATEST
+printf '%s' "${SEED_LATEST:-old
+}" > kb/LATEST
 echo kept > kept.txt
 git add kb/LATEST kept.txt
 git -c user.name=Seed -c user.email=seed@example.invalid commit -q -m seed
@@ -687,8 +693,8 @@ git push -q "$REMOTE" kb-latest
 """
 
 
-@pytest.mark.parametrize("branch_exists", [False, True])
-def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_kb_latest(tmp_path, branch_exists):
+def _record(tmp_path, branch_exists, seed_latest=""):
+    """Seeds a bare remote, runs the Record step against it, and returns (result, remote_git)."""
     git = _git()
     _release_dir(tmp_path, _ASSETS)
     remote = tmp_path / "remote.git"
@@ -696,6 +702,7 @@ def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_
         **_git_env(tmp_path, remote),
         "REMOTE": str(remote),
         "SEED": str(tmp_path / "seed") if branch_exists else "",
+        "SEED_LATEST": seed_latest,
         "RUNNER_TEMP": str(tmp_path),
         "GH_REPO": "owner/repo",
         "TAG": _TAG,
@@ -704,7 +711,6 @@ def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_
     assert seeded.returncode == 0, seeded
     stub = 'gh() { [ "$*" = "auth setup-git" ]; }\n'
     result = _run_bash(stub + _step("Record kb/LATEST on kb-latest", "publish")["run"], env=env, timeout=60)
-    assert result.returncode == 0, result
 
     def remote_git(*args):
         # S603: argv is git plus fixed arguments against this test's own bare repository.
@@ -713,10 +719,17 @@ def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_
             capture_output=True,
             text=True,
             check=True,
-            env={**os.environ, **env},
+            env={**_inherited_env(), **env},
         )
         return done.stdout
 
+    return result, remote_git
+
+
+@pytest.mark.parametrize("branch_exists", [False, True])
+def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_kb_latest(tmp_path, branch_exists):
+    result, remote_git = _record(tmp_path, branch_exists)
+    assert result.returncode == 0, result
     assert remote_git("show", "kb-latest:kb/LATEST") == _LATEST
     assert remote_git("log", "-1", "--format=%s", "kb-latest") == f"Record draft {_TAG}\n"
     if branch_exists:
@@ -725,3 +738,38 @@ def test_kb_release_workflow__record_kb_latest__pushes_the_downloaded_latest_to_
         assert remote_git("log", "-1", "--format=%s", "kb-latest^") == "seed\n"
     else:
         assert remote_git("rev-list", "--count", "kb-latest") == "1\n"
+
+
+def test_kb_release_workflow__record_kb_latest__rerun_with_an_unchanged_latest__succeeds_without_a_commit(tmp_path):
+    result, remote_git = _record(tmp_path, branch_exists=True, seed_latest=_LATEST)
+    assert result.returncode == 0, result
+    assert remote_git("rev-list", "--count", "kb-latest") == "1\n"
+    assert remote_git("log", "-1", "--format=%s", "kb-latest") == "seed\n"
+
+
+def _snapshot(tree):
+    return {path.relative_to(tree): path.read_bytes() for path in tree.rglob("*") if path.is_file()}
+
+
+def test_kb_release_workflow__record_kb_latest__under_an_inherited_git_dir__leaves_that_repository_untouched(
+    tmp_path, monkeypatch
+):
+    git = _git()
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    clean = {**_inherited_env(), **_git_env(tmp_path, tmp_path / "unused.git")}
+    identity = ["-c", "user.name=D", "-c", "user.email=d@example.invalid"]
+    for args in (["init", "-q"], [*identity, "commit", "-q", "--allow-empty", "-m", "decoy"]):
+        # S603: argv is git plus fixed arguments against this test's own repository.
+        subprocess.run([git, "-C", str(decoy), *args], check=True, env=clean, capture_output=True)  # noqa: S603
+    before = _snapshot(decoy)
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(decoy))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(decoy / ".git" / "index"))
+
+    (tmp_path / "run").mkdir()
+    result, remote_git = _record(tmp_path / "run", branch_exists=True)
+
+    assert result.returncode == 0, result
+    assert remote_git("show", "kb-latest:kb/LATEST") == _LATEST
+    assert _snapshot(decoy) == before
